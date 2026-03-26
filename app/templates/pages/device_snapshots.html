@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+
+{% block title %}Snapshots - {{ device.name }}{% endblock %}
+{% block eyebrow %}Configuration History{% endblock %}
+{% block page_title %}Snapshots for {{ device.name }}{% endblock %}
+{% block page_actions %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.device_detail', device_id=device.id) }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Device
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+
+  {% if current_user.role in ["admin", "operator"] %}
+  <div class="panel-card mb-4">
+    <h3 class="panel-title">Rollback</h3>
+    <button class="btn btn-outline-danger btn-sm mt-2" id="rollback-latest-btn" data-endpoint="{{ url_for('api_devices.rollback_device_to_latest_snapshot', device_id=device.id) }}">Rollback to Latest Snapshot</button>
+    <p id="rollback-status" class="text-secondary mt-3"></p>
+    <p id="rollback-jobs-link"></p>
+    <pre id="rollback-output" class="output-box mb-0"></pre>
+  </div>
+  {% endif %}
+
+  <div class="panel-card">
+    <div class="table-responsive">
+    <table class="table table-darkless align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Snapshot ID</th>
+          <th>Created</th>
+          <th>Source/Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in snapshots %}
+        <tr>
+          <td>#{{ s.id }}</td>
+          <td>{{ s.created_at }}</td>
+          <td>-</td>
+          <td>
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.snapshot_detail', snapshot_id=s.id) }}">View</a>
+              {% if not loop.last %}
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-success snapshot-compare-trigger"
+                data-bs-toggle="modal"
+                data-bs-target="#terminalModal"
+                data-compare-endpoint="{{ url_for('api_devices.compare_snapshot_to_previous_api', snapshot_id=s.id) }}"
+                data-terminal-title="Snapshot #{{ s.id }} Diff"
+              >
+                Compare
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No snapshots found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

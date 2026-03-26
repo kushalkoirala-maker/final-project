@@ -1,0 +1,6 @@
+interface {{ interface }}
+ switchport mode access
+ switchport access vlan {{ vlan_id }}
+{% if description %} description {{ description }}
+{% endif %}
+ spanning-tree portfast

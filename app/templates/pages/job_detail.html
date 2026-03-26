@@ -1,0 +1,111 @@
+{% extends "layout.html" %}
+
+{% block title %}Job #{{ job.id }} | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Execution Detail{% endblock %}
+{% block page_title %}Job Detail{% endblock %}
+{% block page_actions %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.jobs_page') }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Jobs
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="row g-4">
+    <div class="col-12 col-xl-5">
+      <section class="panel-card h-100" id="job-detail" data-job-id="{{ job.id }}">
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <p class="panel-kicker mb-1">Queue Record</p>
+            <h3 class="panel-title mb-0">Job #{{ job.id }}</h3>
+          </div>
+          <span id="job-status-badge" class="badge rounded-pill status-{{ job.status }}">{{ job.status|capitalize }}</span>
+        </div>
+
+        <dl class="row detail-list mb-0">
+          <dt class="col-sm-4">Type</dt>
+          <dd class="col-sm-8">{{ job.type }}</dd>
+
+          <dt class="col-sm-4">Devices</dt>
+          <dd class="col-sm-8">
+            {% for pd in per_device %}
+            <div>{% if pd.device %}{{ pd.device.name }} ({{ pd.device.ip_address }}){% else %}Device {{ pd.device_id }}{% endif %}</div>
+            {% else %}
+            <div class="text-secondary">No devices attached.</div>
+            {% endfor %}
+          </dd>
+
+          <dt class="col-sm-4">Created</dt>
+          <dd id="job-created" class="col-sm-8">{{ job.created_at }}</dd>
+
+          <dt class="col-sm-4">Started</dt>
+          <dd id="job-started" class="col-sm-8">{{ job.started_at or "-" }}</dd>
+
+          <dt class="col-sm-4">Finished</dt>
+          <dd id="job-finished" class="col-sm-8">{{ job.finished_at or "-" }}</dd>
+
+          <dt class="col-sm-4">Polling</dt>
+          <dd class="col-sm-8">
+            <span id="job-poll-note" class="text-secondary">Polling every 2s while running.</span>
+          </dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="panel-card mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <p class="panel-kicker mb-1">Device Results</p>
+            <h3 class="panel-title mb-0">Per-Device Status</h3>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-darkless align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Finished</th>
+              </tr>
+            </thead>
+            <tbody id="job-device-results-body">
+              {% for pd in per_device %}
+              <tr>
+                <td>{% if pd.device %}{{ pd.device.name }} ({{ pd.device.ip_address }}){% else %}Device {{ pd.device_id }}{% endif %}</td>
+                <td><span class="badge rounded-pill status-{{ pd.status }}">{{ pd.status|capitalize }}</span></td>
+                <td>{{ pd.started_at or '-' }}</td>
+                <td>{{ pd.finished_at or '-' }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-secondary">No per-device rows.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <p class="panel-kicker mb-1">Terminal Capture</p>
+            <h3 class="panel-title mb-0">Job Output</h3>
+          </div>
+          <button
+            class="btn btn-outline-success btn-sm terminal-trigger"
+            type="button"
+            data-bs-toggle="modal"
+            data-bs-target="#terminalModal"
+            data-terminal-title="Job #{{ job.id }} Raw Output"
+            data-terminal-body="{{ (job.result_text or '(pending)')|e }}"
+          >
+            Open Terminal
+          </button>
+        </div>
+        <pre id="job-result" class="output-box mb-0">{{ job.result_text or '(pending)' }}</pre>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

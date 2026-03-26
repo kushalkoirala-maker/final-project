@@ -1,0 +1,93 @@
+{% extends "layout.html" %}
+
+{% block title %}Alerts | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Event Stream{% endblock %}
+{% block page_title %}Operational Alerts{% endblock %}
+
+{% block content %}
+<div class="page-intro mb-4">
+  <h2 class="h4 mb-1">Severity-based alert timeline</h2>
+  <p class="text-secondary mb-0">Review recent issues, filter by device or severity, and clear alert sets when the incident is resolved.</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-xl-4">
+    <form method="get" class="panel-card mb-4">
+      <p class="panel-kicker mb-1">Filter Stream</p>
+      <h3 class="panel-title mb-3">Query Alerts</h3>
+      <div class="form-floating mb-3">
+        <select id="severity" name="severity" class="form-select">
+          <option value="">all</option>
+          <option value="info" {% if filters.severity == 'info' %}selected{% endif %}>info</option>
+          <option value="warn" {% if filters.severity == 'warn' %}selected{% endif %}>warn</option>
+          <option value="crit" {% if filters.severity == 'crit' %}selected{% endif %}>crit</option>
+        </select>
+        <label for="severity">Severity</label>
+      </div>
+      <div class="form-floating mb-3">
+        <select id="device_id" name="device_id" class="form-select">
+          <option value="">all</option>
+          {% for d in devices %}
+          <option value="{{ d.id }}" {% if filters.device_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+        <label for="device_id">Device</label>
+      </div>
+      <div class="form-floating mb-3">
+        <input id="limit" type="number" min="1" max="500" name="limit" value="{{ filters.limit }}" class="form-control" placeholder="Limit">
+        <label for="limit">Limit</label>
+      </div>
+      <button type="submit" class="btn btn-outline-dark w-100">Apply Filters</button>
+    </form>
+
+    {% if current_user.role == 'admin' %}
+    <form method="post" action="{{ url_for('web.alerts_clear') }}" class="panel-card" onsubmit="return confirm('Clear alerts? This cannot be undone.');">
+      <p class="panel-kicker mb-1">Admin Controls</p>
+      <h3 class="panel-title mb-2">Clear Alerts</h3>
+      <p class="text-secondary small">Remove the current filtered subset or wipe the full alert history.</p>
+      <input type="hidden" name="severity" value="{{ filters.severity }}">
+      <input type="hidden" name="device_id" value="{{ filters.device_id if filters.device_id is not none else '' }}">
+      <input type="hidden" name="limit" value="{{ filters.limit }}">
+      <div class="d-grid gap-2">
+        <button type="submit" name="scope" value="filtered" class="btn btn-primary">Clear Filtered</button>
+        <button type="submit" name="scope" value="all" class="btn btn-outline-dark">Clear All</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <section class="panel-card">
+      <p class="panel-kicker mb-1">Recent Activity</p>
+      <h3 class="panel-title mb-3">Alert Timeline</h3>
+
+      <div class="list-group list-group-flush">
+        {% for a in alerts %}
+        <div class="list-group-item alert-list-item severity-{{ a.severity }}">
+          <div class="d-flex justify-content-between align-items-start gap-3">
+            <div>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="badge rounded-pill severity-{{ a.severity }}">
+                  {{ 'Critical' if a.severity == 'crit' else 'Warning' if a.severity == 'warn' else 'Info' }}
+                </span>
+                <strong>
+                  {% if a.device_id and device_map.get(a.device_id) %}
+                    {{ device_map[a.device_id].name }} ({{ device_map[a.device_id].ip_address }})
+                  {% else %}
+                    Global Event
+                  {% endif %}
+                </strong>
+              </div>
+              <div>{{ a.message }}</div>
+            </div>
+            <small class="text-secondary">{{ a.created_at }}</small>
+          </div>
+        </div>
+        {% else %}
+        <div class="list-group-item text-secondary">No alerts found.</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

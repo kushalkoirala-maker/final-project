@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Local secrets
+.env
+.env.*
+
+# SQLite / local db (only ignore if you don't want DB in repo)
+*.sqlite
+*.db
+
+# Uploads (if your app stores user uploads here)
+uploads/

@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+
+{% block title %}Snapshot #{{ snapshot.id }} | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Configuration Archive{% endblock %}
+{% block page_title %}Snapshot #{{ snapshot.id }}{% endblock %}
+{% block page_actions %}
+{% if device %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.device_snapshots', device_id=device.id) }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Snapshots
+</a>
+{% else %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.devices') }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Devices
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="row g-4">
+    <div class="col-12 col-xl-4">
+      <section class="panel-card">
+        <p class="panel-kicker mb-1">Snapshot Metadata</p>
+        <h3 class="panel-title mb-3">Stored Record</h3>
+        <dl class="row detail-list mb-0">
+          <dt class="col-sm-4">Device</dt>
+          <dd class="col-sm-8">{{ snapshot.device_id }}</dd>
+
+          <dt class="col-sm-4">Created</dt>
+          <dd class="col-sm-8">{{ snapshot.created_at }}</dd>
+
+          <dt class="col-sm-4">Hash</dt>
+          <dd class="col-sm-8"><code>{{ snapshot.config_hash }}</code></dd>
+        </dl>
+        {% if truncated %}
+        <div class="alert alert-warning mt-3 mb-0">Config is truncated in the UI for safety.</div>
+        {% endif %}
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-8">
+      <section class="panel-card">
+        <p class="panel-kicker mb-1">Config Body</p>
+        <h3 class="panel-title mb-3">Captured Configuration</h3>
+        <pre class="output-box mb-0">{{ config_text }}</pre>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

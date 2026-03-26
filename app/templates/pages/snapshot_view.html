@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Snapshot #{{ snapshot.id }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="container">
+  {% include "partials/nav.html" %}
+  {% include "partials/flash.html" %}
+
+  <p>
+    {% if device %}
+    <a href="{{ url_for('web.device_snapshots', device_id=device.id) }}">&larr; Back to Snapshots</a>
+    {% else %}
+    <a href="{{ url_for('web.devices') }}">&larr; Back to Devices</a>
+    {% endif %}
+  </p>
+
+  <h2>Snapshot #{{ snapshot.id }}</h2>
+  <div class="card">
+    <p><b>Device:</b> {{ snapshot.device_id }}</p>
+    <p><b>Created:</b> {{ snapshot.created_at }}</p>
+    <p><b>Hash:</b> <code>{{ snapshot.config_hash }}</code></p>
+    {% if truncated %}
+    <p class="hint">Config is truncated in UI for safety.</p>
+    {% endif %}
+    <pre class="output-box">{{ config_text }}</pre>
+  </div>
+</body>
+</html>

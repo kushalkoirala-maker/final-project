@@ -1,0 +1,70 @@
+{% extends "layout.html" %}
+
+{% block title %}Device: {{ device.name }} | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Inventory Detail{% endblock %}
+{% block page_title %}Device Detail{% endblock %}
+{% block page_actions %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.devices') }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Devices
+</a>
+<a class="btn btn-outline-dark btn-sm" href="{{ url_for('web.device_snapshots', device_id=device.id) }}">
+  <i class="bi bi-clock-history me-2"></i>Snapshots
+</a>
+{% if can_run_commands %}
+<a class="btn btn-primary btn-sm" href="{{ url_for('web.templates_apply_page', device_id=device.id) }}">
+  <i class="bi bi-lightning-charge me-2"></i>Queue Template
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="row g-4">
+    <div class="col-12 col-xl-5">
+      <section class="panel-card h-100">
+        <p class="panel-kicker mb-1">Device Record</p>
+        <h3 class="panel-title mb-3">{{ device.name }}</h3>
+        <dl class="row detail-list mb-0">
+          <dt class="col-sm-4">IP Address</dt>
+          <dd class="col-sm-8">{{ device.ip_address }}</dd>
+
+          <dt class="col-sm-4">Type</dt>
+          <dd class="col-sm-8">{{ device.device_type }}</dd>
+
+          <dt class="col-sm-4">Vendor</dt>
+          <dd class="col-sm-8">{{ device.vendor }}</dd>
+
+          <dt class="col-sm-4">Location</dt>
+          <dd class="col-sm-8">{{ device.location or "-" }}</dd>
+
+          <dt class="col-sm-4">Live Status</dt>
+          <dd class="col-sm-8">
+            <span class="badge rounded-pill {{ 'text-bg-success' if device.is_up else 'text-bg-danger' }}">
+              {{ 'UP' if device.is_up else 'DOWN' }}
+            </span>
+          </dd>
+        </dl>
+      </section>
+    </div>
+
+    {% if can_run_commands %}
+    <div class="col-12 col-xl-7">
+      <section class="panel-card">
+        <p class="panel-kicker mb-1">Remote CLI</p>
+        <h3 class="panel-title mb-3">Run Command</h3>
+        <form id="command-run-form" data-endpoint="{{ url_for('api_devices.run_device_command', device_id=device.id) }}">
+          <label for="command-input" class="form-label">Command</label>
+          <div class="input-group mb-3">
+            <input id="command-input" name="command" class="form-control" type="text" placeholder="show ip int brief" required>
+            <button id="command-submit" type="submit" class="btn btn-primary">Run</button>
+          </div>
+        </form>
+
+        <p id="command-status" class="text-secondary"></p>
+        <pre id="command-output" class="output-box mb-0">Run a command to see output.</pre>
+      </section>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

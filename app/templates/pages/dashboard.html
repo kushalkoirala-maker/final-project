@@ -1,0 +1,193 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Enterprise Operations{% endblock %}
+{% block page_title %}Dashboard Overview{% endblock %}
+{% block page_actions %}
+<span class="badge rounded-pill {{ 'text-bg-success' if zabbix_connected else 'text-bg-secondary' }}">
+  {{ 'Zabbix Online' if zabbix_connected else 'Local Ping Mode' }}
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+<section class="row g-4 mb-4">
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="metric-card metric-primary">
+      <span class="metric-label">Total Devices</span>
+      <strong class="metric-value">{{ total_devices }}</strong>
+      <span class="metric-footnote">Managed inventory count</span>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="metric-card metric-success">
+      <span class="metric-label">Devices Online</span>
+      <strong class="metric-value">{{ up_devices }}</strong>
+      <span class="metric-footnote">Reachable from monitor pipeline</span>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="metric-card metric-danger">
+      <span class="metric-label">Failed Jobs</span>
+      <strong class="metric-value">{{ failed_jobs }}</strong>
+      <span class="metric-footnote">Requires operator review</span>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="metric-card metric-warning">
+      <span class="metric-label">Active Zabbix Alerts</span>
+      <strong class="metric-value">{{ active_zabbix_alerts }}</strong>
+      <span class="metric-footnote">Live trigger count</span>
+    </div>
+  </div>
+</section>
+
+<section class="row g-4 mb-4">
+  <div class="col-12">
+    <div class="panel-card">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+          <p class="panel-kicker mb-1">Quick Action</p>
+          <h3 class="panel-title mb-0">Operator Shortcuts</h3>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-primary btn-sm" href="{{ url_for('web.devices') }}">Add Device</a>
+          <a class="btn btn-outline-dark btn-sm" href="{{ url_for('web.templates_apply_page') }}">Deploy Template</a>
+          <a class="btn btn-outline-danger btn-sm" href="{{ url_for('web.alerts_page') }}">View Alerts</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if monitor_warning %}
+<div class="alert alert-warning border-0 shadow-sm">{{ monitor_warning }}</div>
+{% endif %}
+
+<section class="row g-4">
+  <div class="col-12 col-xl-7">
+    <div class="panel-card h-100">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <p class="panel-kicker mb-1">Inventory Health</p>
+          <h3 class="panel-title mb-0">Monitored Hosts</h3>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-darkless align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Status</th>
+              <th>CPU</th>
+              <th>Memory</th>
+              <th>Uptime</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for host in monitored_hosts %}
+            <tr>
+              <td>
+                <div class="fw-semibold">{{ host.device_name }}</div>
+                <div class="small text-secondary">{{ host.ip_address }}</div>
+              </td>
+              <td>
+                <span class="badge rounded-pill {{ 'text-bg-success' if host.status == 'Online' else 'text-bg-danger' }}">{{ host.status }}</span>
+              </td>
+              <td>{{ host.cpu if host.cpu is not none else 'N/A' }}</td>
+              <td>{{ host.memory if host.memory is not none else 'N/A' }}</td>
+              <td>{{ host.uptime if host.uptime is not none else 'N/A' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-secondary">No monitored hosts available.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-5">
+    <div class="panel-card h-100">
+      <p class="panel-kicker mb-1">Security Events</p>
+      <h3 class="panel-title">Recent Alerts</h3>
+      <div class="d-flex flex-column gap-3 mt-3">
+        {% for a in alerts %}
+        <div class="alert-tile">
+          <span class="badge rounded-pill severity-{{ a.severity }}">{{ a.severity|upper }}</span>
+          <div>
+            <div class="fw-semibold">{{ a.message }}</div>
+            <div class="small text-secondary">{{ a.created_at }}</div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-secondary mb-0">No alerts recorded.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="panel-card">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <p class="panel-kicker mb-1">Automation Queue</p>
+          <h3 class="panel-title mb-0">Recent Jobs</h3>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.jobs_page') }}">Open Full Queue</a>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-darkless align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Devices</th>
+              <th>Status</th>
+              <th>Per-Device</th>
+              <th>Terminal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in recent_job_rows %}
+            {% set j = row.job %}
+            <tr>
+              <td>
+                <a class="fw-semibold text-decoration-none" href="{{ url_for('web.job_detail_page', job_id=j.id) }}">#{{ j.id }}</a>
+                <div class="small text-secondary">{{ j.type }}</div>
+              </td>
+              <td>
+                {% for pd in row.per_device %}
+                <div>{% if pd.device %}{{ pd.device.name }}{% else %}{{ pd.device_id }}{% endif %}</div>
+                {% endfor %}
+              </td>
+              <td><span class="badge rounded-pill status-{{ j.status }}">{{ j.status|capitalize }}</span></td>
+              <td>
+                {% for pd in row.per_device %}
+                <span class="badge rounded-pill status-{{ pd.status }} me-1 mb-1">#{{ pd.device_id }} {{ pd.status|capitalize }}</span>
+                {% endfor %}
+              </td>
+              <td>
+                <button
+                  class="btn btn-sm btn-outline-success terminal-trigger"
+                  type="button"
+                  data-bs-toggle="modal"
+                  data-bs-target="#terminalModal"
+                  data-terminal-title="Job #{{ j.id }} Raw Output"
+                  data-terminal-body="{{ (j.result_text or 'No terminal output captured yet.')|e }}"
+                >
+                  Open Terminal
+                </button>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-secondary">No jobs have been queued yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+{% endblock %}

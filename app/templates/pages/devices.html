@@ -1,0 +1,119 @@
+{% extends "layout.html" %}
+
+{% block title %}Devices | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Inventory Management{% endblock %}
+{% block page_title %}Device Inventory{% endblock %}
+
+{% block content %}
+{% if monitor_warning %}
+<div class="alert alert-warning border-0 shadow-sm">{{ monitor_warning }}</div>
+{% endif %}
+
+{% if current_user.role in ["admin", "operator"] %}
+<section class="panel-card mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <p class="panel-kicker mb-1">Enrollment</p>
+      <h3 class="panel-title mb-0">Add Managed Device</h3>
+    </div>
+  </div>
+  <form method="post" class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label">Name</label>
+      <input class="form-control" name="name" placeholder="R1-Core" required>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">IP Address</label>
+      <input class="form-control" name="ip_address" placeholder="192.168.1.1" required>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Location</label>
+      <input class="form-control" name="location" placeholder="DC Rack A">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Type</label>
+      <select class="form-select" name="device_type">
+        <option value="router">router</option>
+        <option value="switch">switch</option>
+        <option value="linux">linux</option>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Vendor</label>
+      <input class="form-control" name="vendor" value="cisco">
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+      <button type="submit" class="btn btn-primary w-100">Add Device</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel-card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <p class="panel-kicker mb-1">Operational Status</p>
+      <h3 class="panel-title mb-0">Inventory</h3>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-darkless align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>IP</th>
+          <th>Type</th>
+          <th>Vendor</th>
+          <th>Location</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in devices %}
+        {% set live = status_map.get(d.id, {}) %}
+        {% set is_online = live.get('status') == 'Online' or d.is_up %}
+        <tr>
+          <td>
+            <a class="fw-semibold text-decoration-none" href="{{ url_for('web.device_detail', device_id=d.id) }}">{{ d.name }}</a>
+          </td>
+          <td>{{ d.ip_address }}</td>
+          <td class="text-capitalize">{{ d.device_type }}</td>
+          <td class="text-capitalize">{{ d.vendor }}</td>
+          <td>{{ d.location or "-" }}</td>
+          <td>
+            <span class="badge rounded-pill {{ 'bg-success' if is_online else 'bg-danger' }}">
+              {{ "Online" if is_online else "Offline" }}
+            </span>
+          </td>
+          <td>
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.device_snapshots', device_id=d.id) }}">Snapshots</a>
+              {% if current_user.role in ['admin', 'operator'] %}
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-success connection-test-btn"
+                data-device-id="{{ d.id }}"
+                data-device-name="{{ d.name }}"
+                data-bs-toggle="modal"
+                data-bs-target="#terminalModal"
+              >
+                Test Connection
+              </button>
+              <form method="post" action="{{ url_for('web.device_delete', device_id=d.id) }}" class="inline-form" onsubmit="return confirm('Remove device {{ d.name }} and all its snapshots/jobs/alerts?');">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">No devices in inventory yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

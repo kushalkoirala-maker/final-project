@@ -1,0 +1,100 @@
+{% extends "layout.html" %}
+
+{% block title %}Users | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Access Control{% endblock %}
+{% block page_title %}User Administration{% endblock %}
+
+{% block content %}
+<div class="page-intro mb-4">
+  <h2 class="h4 mb-1">Manage platform access</h2>
+  <p class="text-secondary mb-0">Create accounts, change roles, and disable or delete users from a single control surface.</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-xl-4">
+    <form method="post" action="{{ url_for('web.admin_user_create') }}" class="panel-card">
+      <p class="panel-kicker mb-1">Provisioning</p>
+      <h3 class="panel-title mb-3">Create User</h3>
+      <div class="form-floating mb-3">
+        <input class="form-control" name="username" required placeholder="Username">
+        <label>Username</label>
+      </div>
+      <div class="form-floating mb-3">
+        <input class="form-control" name="password" type="password" minlength="8" required placeholder="Password">
+        <label>Password</label>
+      </div>
+      <div class="form-floating mb-3">
+        <select class="form-select" name="role">
+          <option value="viewer">viewer</option>
+          <option value="operator">operator</option>
+          <option value="admin">admin</option>
+        </select>
+        <label>Role</label>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">Create User</button>
+    </form>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <section class="panel-card">
+      <p class="panel-kicker mb-1">Directory</p>
+      <h3 class="panel-title mb-3">User Accounts</h3>
+      <div class="table-responsive">
+        <table class="table table-darkless align-middle mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Username</th>
+              <th>Status</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td>{{ u.id }}</td>
+              <td>{{ u.username }}</td>
+              <td>
+                {% if u.role == 'disabled' %}
+                <span class="badge rounded-pill bg-danger">Disabled</span>
+                {% else %}
+                <span class="badge rounded-pill bg-success">Active</span>
+                {% endif %}
+              </td>
+              <td>{{ u.role }}</td>
+              <td>{{ u.created_at if u.created_at is defined and u.created_at else '-' }}</td>
+              <td>
+                <div class="d-flex flex-wrap gap-2">
+                  <form method="post" action="{{ url_for('web.admin_user_update_role', user_id=u.id) }}" class="inline-form">
+                    <select name="role" class="form-select form-select-sm" {% if u.role == 'disabled' %}disabled{% endif %}>
+                      <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
+                      <option value="operator" {% if u.role == 'operator' %}selected{% endif %}>operator</option>
+                      <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+                    </select>
+                    <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.role == 'disabled' %}disabled{% endif %}>Set Role</button>
+                  </form>
+
+                  <form method="post" action="{{ url_for('web.admin_user_toggle', user_id=u.id) }}" class="inline-form">
+                    {% if u.role == 'disabled' %}
+                    <button type="submit" class="btn btn-primary btn-sm">Enable</button>
+                    {% else %}
+                    <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.id == current_user.id %}disabled{% endif %}>Disable</button>
+                    {% endif %}
+                  </form>
+
+                  <form method="post" action="{{ url_for('web.admin_user_delete', user_id=u.id) }}" class="inline-form" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
+                    <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.id == current_user.id %}disabled{% endif %}>Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "layout.html" %}
+
+{% block title %}Apply Template | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Deployment Workspace{% endblock %}
+{% block page_title %}Apply Template{% endblock %}
+{% block page_actions %}
+<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('web.templates_page') }}">
+  <i class="bi bi-arrow-left me-2"></i>Back to Templates
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="row g-4">
+    <div class="col-12 col-xxl-8">
+      <section
+        class="panel-card"
+        id="templates-tool"
+        data-template-schemas='{{ template_schemas | tojson }}'
+        data-can-apply='{{ "1" if can_apply else "0" }}'
+      >
+        <div class="page-intro mb-4">
+          <h2 class="h4 mb-1">Render, review, and queue configuration changes</h2>
+          <p class="text-secondary mb-0">Select a target device, inspect the generated commands, compare the diff, and submit the job when it looks right.</p>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-12 col-lg-6">
+            <label for="tpl-device" class="form-label">Device</label>
+            <select id="tpl-device" class="form-select">
+              <option value="">Select device</option>
+              {% for d in devices %}
+              <option value="{{ d.id }}" {% if selected_device_id == d.id %}selected{% endif %}>{{ d.name }} ({{ d.ip_address }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-lg-6">
+            <label for="tpl-name" class="form-label">Template</label>
+            <select id="tpl-name" class="form-select">
+              <option value="">Select template</option>
+              {% for t in templates %}
+              <option value="{{ t }}">{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <p id="tpl-description" class="text-secondary mt-3 mb-0"></p>
+        <div id="tpl-fields" class="row g-3 mt-1"></div>
+
+        <div class="form-check form-switch my-4">
+          <input type="checkbox" class="form-check-input" id="tpl-allow-risky">
+          <label class="form-check-label" for="tpl-allow-risky">Allow risky commands</label>
+        </div>
+
+        <div class="btn-group mb-3" role="group" aria-label="Template actions">
+          <button id="tpl-preview-btn" type="button" class="btn btn-outline-dark">Preview</button>
+          <button id="tpl-diff-btn" type="button" class="btn btn-outline-secondary">Diff</button>
+          {% if can_apply %}
+          <button id="tpl-apply-btn" type="button" class="btn btn-primary">Apply</button>
+          {% endif %}
+        </div>
+
+        <p id="tpl-status" class="text-secondary"></p>
+        <p id="tpl-job-link"></p>
+        <pre id="tpl-output" class="output-box mb-0">Select a device and template.</pre>
+      </section>
+    </div>
+
+    <div class="col-12 col-xxl-4">
+      <section class="panel-card h-100">
+        <p class="panel-kicker mb-1">Workflow</p>
+        <h3 class="panel-title mb-3">Recommended Sequence</h3>
+        <div class="d-flex flex-column gap-3 text-secondary">
+          <div><strong class="text-dark">1.</strong> Choose the device and template.</div>
+          <div><strong class="text-dark">2.</strong> Fill in the template variables.</div>
+          <div><strong class="text-dark">3.</strong> Use Preview and Diff before queueing Apply.</div>
+          <div><strong class="text-dark">4.</strong> Monitor the resulting job from the Jobs page.</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

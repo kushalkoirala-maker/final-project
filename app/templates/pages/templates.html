@@ -1,0 +1,60 @@
+{% extends "layout.html" %}
+
+{% block title %}Templates | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Configuration Library{% endblock %}
+{% block page_title %}Automation Templates{% endblock %}
+{% block page_actions %}
+{% if can_apply %}
+<a class="btn btn-primary btn-sm" href="{{ url_for('web.templates_apply_page') }}">Open Apply Tool</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+<div class="page-intro mb-4">
+  <h2 class="h4 mb-1">Reusable configuration blueprints</h2>
+  <p class="text-secondary mb-0">Browse approved Jinja2 templates, inspect their code, and launch controlled jobs from the apply workspace.</p>
+</div>
+
+<section class="row g-4">
+  {% for t in templates %}
+  {% set schema = template_schemas.get(t, {}) %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="panel-card h-100 d-flex flex-column">
+      <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+          <p class="panel-kicker mb-1">Template</p>
+          <h3 class="panel-title mb-0">{{ t.replace('_', ' ')|title }}</h3>
+        </div>
+        <span class="badge rounded-pill text-bg-dark">{{ schema.get('fields', [])|length }} vars</span>
+      </div>
+      <p class="text-secondary mb-3">{{ schema.get('description', 'No description available.') }}</p>
+      <div class="small text-secondary mb-3">
+        {% for f in schema.get('fields', []) %}
+        <span class="badge rounded-pill text-bg-light me-1 mb-1">{{ f.name }}</span>
+        {% else %}
+        <span>No variables required.</span>
+        {% endfor %}
+      </div>
+      <div class="mt-auto d-flex gap-2">
+        <button
+          class="btn btn-outline-dark btn-sm terminal-trigger"
+          type="button"
+          data-bs-toggle="modal"
+          data-bs-target="#terminalModal"
+          data-terminal-title="{{ t }} Template Code"
+          data-terminal-body="{{ (template_sources.get(t) or 'Template source unavailable.')|e }}"
+        >
+          View Code
+        </button>
+        {% if can_apply %}
+        <a class="btn btn-primary btn-sm" href="{{ url_for('web.templates_apply_page', device_id=request.args.get('device_id', type=int)) }}">Use Template</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+</div>
+{% endblock %}

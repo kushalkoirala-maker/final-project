@@ -1,0 +1,17 @@
+<nav class="nav">
+  <div class="nav-left">
+    <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('web.devices') }}">Devices</a>
+    <a href="{{ url_for('web.monitoring_page') }}">Monitoring</a>
+    <a href="{{ url_for('web.templates_page') }}">Templates</a>
+    <a href="{{ url_for('web.jobs_page') }}">Jobs</a>
+    <a href="{{ url_for('web.alerts_page') }}">Alerts</a>
+    {% if current_user.role == 'admin' %}
+    <a href="{{ url_for('web.admin_users_page') }}">Users</a>
+    {% endif %}
+  </div>
+  <div class="nav-right">
+    <span class="role">User: {{ current_user.username }} ({{ current_user.role }})</span>
+    <a href="{{ url_for('web.logout') }}">Logout</a>
+  </div>
+</nav>

@@ -1,0 +1,204 @@
+{% extends "layout.html" %}
+
+{% block title %}Monitoring | NetOps Automation Platform{% endblock %}
+{% block eyebrow %}Observability{% endblock %}
+{% block page_title %}Real-Time Device Health{% endblock %}
+{% block page_actions %}
+<span id="zabbix-status-badge" class="badge rounded-pill {{ 'text-bg-success' if zabbix_connected else 'text-bg-danger' }}">
+  {{ 'Zabbix Connected' if zabbix_connected else 'Zabbix Unavailable' }}
+</span>
+<button id="refresh-monitoring-btn" class="btn btn-outline-dark btn-sm" type="button">Refresh</button>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="page-intro mb-4">
+    <h2 class="h4 mb-1">Live infrastructure telemetry</h2>
+    <p class="text-secondary mb-0">CPU, memory, uptime, and interface counters for devices under active monitoring.</p>
+  </div>
+
+  {% if monitor_warning %}
+  <div id="monitor-warning" class="alert alert-warning">{{ monitor_warning }}</div>
+  {% else %}
+  <div id="monitor-warning" class="alert alert-warning d-none"></div>
+  {% endif %}
+
+  <section class="panel-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <p class="panel-kicker mb-1">Operations Matrix</p>
+        <h3 class="panel-title mb-0">Device Health Table</h3>
+      </div>
+      <small id="monitoring-updated-at" class="text-secondary">Last update: --</small>
+    </div>
+    <div class="mb-3">
+      <div class="input-group">
+        <span class="input-group-text bg-white border-0"><i class="bi bi-search"></i></span>
+        <input id="monitoring-search" type="search" class="form-control border-0" placeholder="Filter by router name or IP address">
+      </div>
+    </div>
+    <div id="monitoring-container" class="table-responsive"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const initialDevices = {{ device_health | tojson }};
+  const initialZabbixConnected = {{ zabbix_connected | tojson }};
+  const monitoringContainer = document.getElementById("monitoring-container");
+  const refreshButton = document.getElementById("refresh-monitoring-btn");
+  const updatedAt = document.getElementById("monitoring-updated-at");
+  const zabbixBadge = document.getElementById("zabbix-status-badge");
+  const monitorWarning = document.getElementById("monitor-warning");
+  const monitoringSearch = document.getElementById("monitoring-search");
+  let latestDevices = initialDevices || [];
+
+  function safeNumber(value, decimals = 2) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+    return Number(value).toFixed(decimals);
+  }
+
+  function renderProgress(value, okClass) {
+    const parsed = Number(value);
+    if (value === null || value === undefined || Number.isNaN(parsed)) {
+      return '<span class="text-secondary">N/A</span>';
+    }
+    const pct = Math.min(parsed, 100);
+    const css = parsed > 80 ? "bg-danger" : okClass;
+    return `
+      <div class="progress" role="progressbar" aria-valuenow="${parsed}" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar ${css}" style="width: ${pct}%">${safeNumber(parsed, 2)}%</div>
+      </div>
+    `;
+  }
+
+  function renderInterfaces(interfaces) {
+    if (!interfaces || interfaces.length === 0) {
+      return '<span class="text-secondary">No interface metrics</span>';
+    }
+
+    const items = interfaces.map((iface) => {
+      const up = iface.status === 1;
+      const statusBadge = iface.status === null
+        ? '<span class="badge rounded-pill text-bg-secondary">Unknown</span>'
+        : (up ? '<span class="badge rounded-pill text-bg-success">Up</span>' : '<span class="badge rounded-pill text-bg-danger">Down</span>');
+      const inOctets = iface.in_octets === null || iface.in_octets === undefined ? "N/A" : Number(iface.in_octets).toFixed(0);
+      const outOctets = iface.out_octets === null || iface.out_octets === undefined ? "N/A" : Number(iface.out_octets).toFixed(0);
+      return `
+        <li class="mb-2">
+          <strong>if${iface.index}</strong> ${statusBadge}
+          <div class="small text-secondary mt-1">In: ${inOctets} | Out: ${outOctets}</div>
+        </li>
+      `;
+    }).join("");
+
+    return `<ul class="list-unstyled mb-0 small">${items}</ul>`;
+  }
+
+  function filterDevices(devices) {
+    const query = (monitoringSearch.value || "").trim().toLowerCase();
+    if (!query) {
+      return devices;
+    }
+    return (devices || []).filter((row) => {
+      return (row.device_name || "").toLowerCase().includes(query)
+        || (row.ip_address || "").toLowerCase().includes(query);
+    });
+  }
+
+  function renderTable(devices) {
+    devices = filterDevices(devices || []);
+    if (!devices || devices.length === 0) {
+      monitoringContainer.innerHTML = `
+        <table class="table table-hover table-borderless align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>CPU</th>
+              <th>Memory</th>
+              <th>Uptime</th>
+              <th>Interfaces</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" class="text-center text-secondary py-4">No devices found.</td></tr>
+          </tbody>
+        </table>
+      `;
+      return;
+    }
+
+    const rows = devices.map((row) => {
+      const uptime = row.uptime_ticks === null || row.uptime_ticks === undefined ? '<span class="text-secondary">N/A</span>' : Number(row.uptime_ticks).toFixed(0);
+      return `
+        <tr>
+          <td>
+            <div class="fw-semibold">${row.device_name}</div>
+            <div class="small text-secondary">${row.ip_address}</div>
+          </td>
+          <td style="min-width: 190px;">${renderProgress(row.cpu_usage, "bg-success")}</td>
+          <td style="min-width: 190px;">${renderProgress(row.memory_usage, "bg-info")}</td>
+          <td>${uptime}</td>
+          <td style="min-width: 300px;">${renderInterfaces(row.interfaces)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    monitoringContainer.innerHTML = `
+      <table class="table table-hover table-borderless align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Device</th>
+            <th>CPU</th>
+            <th>Memory</th>
+            <th>Uptime</th>
+            <th>Interfaces</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function updateZabbixStatus(isConnected, warningMessage) {
+    zabbixBadge.textContent = isConnected ? "Zabbix Connected" : "Zabbix Unavailable";
+    zabbixBadge.className = "badge rounded-pill " + (isConnected ? "text-bg-success" : "text-bg-danger");
+    if (warningMessage) {
+      monitorWarning.textContent = warningMessage;
+      monitorWarning.className = "alert alert-warning";
+    } else {
+      monitorWarning.textContent = "";
+      monitorWarning.className = "alert alert-warning d-none";
+    }
+  }
+
+  async function loadMonitoringData() {
+    try {
+      const response = await fetch("{{ url_for('web.monitoring_api') }}", {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const payload = await response.json();
+      latestDevices = payload.devices || [];
+      renderTable(latestDevices);
+      updateZabbixStatus(!!payload.zabbix_connected, payload.warning || "");
+      updatedAt.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      updatedAt.textContent = "Last update failed";
+      updateZabbixStatus(false, "Unable to refresh monitoring data.");
+    }
+  }
+
+  renderTable(latestDevices);
+  updateZabbixStatus(!!initialZabbixConnected, {{ monitor_warning | tojson }});
+  updatedAt.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+  monitoringSearch.addEventListener("input", () => renderTable(latestDevices));
+  refreshButton.addEventListener("click", loadMonitoringData);
+  setInterval(loadMonitoringData, 45000);
+</script>
+{% endblock %}
