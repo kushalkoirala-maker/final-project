@@ -4,8 +4,8 @@
 {% block eyebrow %}Enterprise Operations{% endblock %}
 {% block page_title %}Dashboard Overview{% endblock %}
 {% block page_actions %}
-<span class="badge rounded-pill {{ 'text-bg-success' if zabbix_connected else 'text-bg-secondary' }}">
-  {{ 'Zabbix Online' if zabbix_connected else 'Local Ping Mode' }}
+<span class="badge rounded-pill text-bg-info">
+  Netmiko SSH Monitoring
 </span>
 {% endblock %}
 
@@ -23,7 +23,7 @@
     <div class="metric-card metric-success">
       <span class="metric-label">Devices Online</span>
       <strong class="metric-value">{{ up_devices }}</strong>
-      <span class="metric-footnote">Reachable from monitor pipeline</span>
+      <span class="metric-footnote">Reachable via SSH monitoring</span>
     </div>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
@@ -34,10 +34,10 @@
     </div>
   </div>
   <div class="col-12 col-md-6 col-xl-3">
-    <div class="metric-card metric-warning">
-      <span class="metric-label">Active Zabbix Alerts</span>
-      <strong class="metric-value">{{ active_zabbix_alerts }}</strong>
-      <span class="metric-footnote">Live trigger count</span>
+    <div class="metric-card metric-info">
+      <span class="metric-label">Recent Alerts</span>
+      <strong class="metric-value">{{ alerts | length }}</strong>
+      <span class="metric-footnote">Latest device/system events</span>
     </div>
   </div>
 </section>

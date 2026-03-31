@@ -12,7 +12,7 @@
 
 <div class="row g-4">
   <div class="col-12 col-xl-4">
-    <form method="post" action="{{ url_for('web.admin_user_create') }}" class="panel-card">
+    <form method="post" action="{{ url_for('web.admin_users_page') }}" class="panel-card">
       <p class="panel-kicker mb-1">Provisioning</p>
       <h3 class="panel-title mb-3">Create User</h3>
       <div class="form-floating mb-3">
@@ -57,36 +57,25 @@
               <td>{{ u.id }}</td>
               <td>{{ u.username }}</td>
               <td>
-                {% if u.role == 'disabled' %}
-                <span class="badge rounded-pill bg-danger">Disabled</span>
-                {% else %}
+                {% if u.active %}
                 <span class="badge rounded-pill bg-success">Active</span>
+                {% else %}
+                <span class="badge rounded-pill bg-danger">Disabled</span>
                 {% endif %}
               </td>
               <td>{{ u.role }}</td>
               <td>{{ u.created_at if u.created_at is defined and u.created_at else '-' }}</td>
               <td>
                 <div class="d-flex flex-wrap gap-2">
-                  <form method="post" action="{{ url_for('web.admin_user_update_role', user_id=u.id) }}" class="inline-form">
-                    <select name="role" class="form-select form-select-sm" {% if u.role == 'disabled' %}disabled{% endif %}>
-                      <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
-                      <option value="operator" {% if u.role == 'operator' %}selected{% endif %}>operator</option>
-                      <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
-                    </select>
-                    <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.role == 'disabled' %}disabled{% endif %}>Set Role</button>
-                  </form>
-
-                  <form method="post" action="{{ url_for('web.admin_user_toggle', user_id=u.id) }}" class="inline-form">
-                    {% if u.role == 'disabled' %}
-                    <button type="submit" class="btn btn-primary btn-sm">Enable</button>
-                    {% else %}
+                  {% if u.active %}
+                  <form method="post" action="{{ url_for('web.admin_user_disable', user_id=u.id) }}" class="inline-form">
                     <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.id == current_user.id %}disabled{% endif %}>Disable</button>
-                    {% endif %}
                   </form>
-
-                  <form method="post" action="{{ url_for('web.admin_user_delete', user_id=u.id) }}" class="inline-form" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
-                    <button type="submit" class="btn btn-outline-dark btn-sm" {% if u.id == current_user.id %}disabled{% endif %}>Delete</button>
+                  {% else %}
+                  <form method="post" action="{{ url_for('web.admin_user_enable', user_id=u.id) }}" class="inline-form">
+                    <button type="submit" class="btn btn-primary btn-sm">Enable</button>
                   </form>
+                  {% endif %}
                 </div>
               </td>
             </tr>

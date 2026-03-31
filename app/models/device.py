@@ -9,6 +9,7 @@ class Device(db.Model):
     - last_seen: Operational depth tracking for monitoring pipeline health
     - ssh_port: Support for non-standard management ports
     - description: Administrative audit trail for device context
+    - enable_secret: Device-specific enable password for privilege mode
     """
     __tablename__ = "device"
     __table_args__ = (
@@ -27,7 +28,11 @@ class Device(db.Model):
     ssh_port = db.Column(db.Integer, nullable=False, default=22)
     # Enterprise: Administrative notes for device context and history
     description = db.Column(db.Text, nullable=True)
+    # Enterprise: Device-specific enable secret (falls back to CONFIG if not set)
+    enable_secret = db.Column(db.String(255), nullable=True)
     is_up = db.Column(db.Boolean, nullable=False, default=False)
+    # Enterprise: Degraded status flag (SSH failed but ICMP ping succeeded)
+    degraded_status = db.Column(db.Boolean, nullable=False, default=False)
     # Enterprise: Operational depth - timestamp when monitoring pipeline last reached device
     last_seen = db.Column(db.DateTime, nullable=True, default=None)
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
@@ -62,7 +67,7 @@ class Device(db.Model):
     )
 
     def __repr__(self) -> str:
-        status = "up" if self.is_up else "down"
+        status = "degraded" if self.degraded_status else ("up" if self.is_up else "down")
         last_seen_str = self.last_seen.isoformat() if self.last_seen else "never"
         return (
             f"<Device(id={self.id}, name={self.name!r}, ip_address={self.ip_address!r}, "

@@ -4,8 +4,8 @@
 {% block eyebrow %}Observability{% endblock %}
 {% block page_title %}Real-Time Device Health{% endblock %}
 {% block page_actions %}
-<span id="zabbix-status-badge" class="badge rounded-pill {{ 'text-bg-success' if zabbix_connected else 'text-bg-danger' }}">
-  {{ 'Zabbix Connected' if zabbix_connected else 'Zabbix Unavailable' }}
+<span id="monitoring-status-badge" class="badge rounded-pill text-bg-info">
+  Netmiko SSH Monitoring
 </span>
 <button id="refresh-monitoring-btn" class="btn btn-outline-dark btn-sm" type="button">Refresh</button>
 {% endblock %}
@@ -14,14 +14,8 @@
 <div class="container-fluid px-0">
   <div class="page-intro mb-4">
     <h2 class="h4 mb-1">Live infrastructure telemetry</h2>
-    <p class="text-secondary mb-0">CPU, memory, uptime, and interface counters for devices under active monitoring.</p>
+    <p class="text-secondary mb-0">CPU, memory, uptime, and interface counters for devices under active monitoring via Netmiko SSH.</p>
   </div>
-
-  {% if monitor_warning %}
-  <div id="monitor-warning" class="alert alert-warning">{{ monitor_warning }}</div>
-  {% else %}
-  <div id="monitor-warning" class="alert alert-warning d-none"></div>
-  {% endif %}
 
   <section class="panel-card">
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -45,12 +39,9 @@
 {% block scripts %}
 <script>
   const initialDevices = {{ device_health | tojson }};
-  const initialZabbixConnected = {{ zabbix_connected | tojson }};
   const monitoringContainer = document.getElementById("monitoring-container");
   const refreshButton = document.getElementById("refresh-monitoring-btn");
   const updatedAt = document.getElementById("monitoring-updated-at");
-  const zabbixBadge = document.getElementById("zabbix-status-badge");
-  const monitorWarning = document.getElementById("monitor-warning");
   const monitoringSearch = document.getElementById("monitoring-search");
   let latestDevices = initialDevices || [];
 
@@ -161,15 +152,9 @@
     `;
   }
 
-  function updateZabbixStatus(isConnected, warningMessage) {
-    zabbixBadge.textContent = isConnected ? "Zabbix Connected" : "Zabbix Unavailable";
-    zabbixBadge.className = "badge rounded-pill " + (isConnected ? "text-bg-success" : "text-bg-danger");
-    if (warningMessage) {
-      monitorWarning.textContent = warningMessage;
-      monitorWarning.className = "alert alert-warning";
-    } else {
-      monitorWarning.textContent = "";
-      monitorWarning.className = "alert alert-warning d-none";
+  function updateMonitoringStatus(timestamp) {
+    if (timestamp) {
+      updatedAt.textContent = `Last update: ${timestamp}`;
     }
   }
 
@@ -186,17 +171,14 @@
       const payload = await response.json();
       latestDevices = payload.devices || [];
       renderTable(latestDevices);
-      updateZabbixStatus(!!payload.zabbix_connected, payload.warning || "");
-      updatedAt.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+      updateMonitoringStatus(new Date().toLocaleTimeString());
     } catch (error) {
       updatedAt.textContent = "Last update failed";
-      updateZabbixStatus(false, "Unable to refresh monitoring data.");
     }
   }
 
   renderTable(latestDevices);
-  updateZabbixStatus(!!initialZabbixConnected, {{ monitor_warning | tojson }});
-  updatedAt.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+  updateMonitoringStatus(new Date().toLocaleTimeString());
   monitoringSearch.addEventListener("input", () => renderTable(latestDevices));
   refreshButton.addEventListener("click", loadMonitoringData);
   setInterval(loadMonitoringData, 45000);

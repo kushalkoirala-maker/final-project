@@ -5,11 +5,13 @@ from flask import Flask
 from dotenv import load_dotenv
 from sqlalchemy import inspect, text
 from .config import Config
-from .db import db
-from .auth import login_manager
+from .db import db, migrate
 from .services.monitor import start_monitor
 from .services.job_worker import start_job_worker
-from .services.snmp_monitor import start_snmp_monitor
+from .auth import login_manager
+
+
+
 
 
 def _is_demo_mode_enabled() -> bool:
@@ -111,6 +113,45 @@ def _ensure_job_table_columns() -> None:
         db.session.commit()
 
 
+def _register_template_filters(app: Flask) -> None:
+    """Register custom Jinja2 template filters for date/time formatting."""
+    
+    @app.template_filter('format_relative_time')
+    def format_relative_time(dt):
+        """
+        Format datetime as relative time (e.g., '2 mins ago', '1 hour ago').
+        Falls back to formatted date if unable to parse.
+        """
+        if not dt:
+            return "Never"
+        
+        try:
+            # Ensure dt is timezone-aware for comparison
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            delta = now - dt
+            seconds = int(delta.total_seconds())
+            
+            if seconds < 60:
+                return f"{seconds}s ago" if seconds > 1 else "just now"
+            elif seconds < 3600:
+                mins = seconds // 60
+                return f"{mins} min{'s' if mins > 1 else ''} ago"
+            elif seconds < 86400:
+                hours = seconds // 3600
+                return f"{hours} hour{'s' if hours > 1 else ''} ago"
+            elif seconds < 604800:
+                days = seconds // 86400
+                return f"{days} day{'s' if days > 1 else ''} ago"
+            else:
+                weeks = seconds // 604800
+                return f"{weeks} week{'s' if weeks > 1 else ''} ago"
+        except Exception:
+            return dt.strftime('%Y-%m-%d %H:%M:%S') if dt else "Unknown"
+
+
 def create_app():
     load_dotenv()
 
@@ -121,6 +162,7 @@ def create_app():
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
+    migrate.init_app(app, db)
     login_manager.init_app(app)
 
     from .routes import web_bp
@@ -128,6 +170,9 @@ def create_app():
 
     app.register_blueprint(web_bp)
     app.register_blueprint(api_devices_bp, url_prefix="/api")
+    
+    # Register custom template filters for relative date/time formatting
+    _register_template_filters(app)
 
     with app.app_context():
         from .models import user, device, alert, config_snapshot, job, metrics  # noqa: F401
@@ -144,9 +189,10 @@ def create_app():
         if _is_demo_mode_enabled():
             _seed_demo_data_if_needed()
 
-    # Start background services
-    start_monitor(app)
+        # Start Netmiko-based SSH monitoring service
+        start_monitor(app)
+
+    # Start background job worker service
     start_job_worker(app)
-    start_snmp_monitor(app)
 
     return app

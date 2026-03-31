@@ -19,8 +19,16 @@ MAX_SNAPSHOT_PREVIEW_CHARS = 120_000
 
 
 def _build_monitoring_payload() -> list[dict]:
+    """
+    Build monitoring payload from local Metrics table.
+    
+    Queries the latest CPU and Memory metrics for each device
+    and returns a list of device health dicts with metric values.
+    No external (Zabbix) dependencies.
+    """
     devices = Device.query.order_by(Device.name.asc()).all()
 
+    # Get latest metrics for each device/metric_name combination
     latest_subquery = (
         db.session.query(
             Metrics.device_id.label("device_id"),
@@ -44,46 +52,38 @@ def _build_monitoring_payload() -> list[dict]:
         .all()
     )
 
+    # Build map of device_id -> {metric_name: value}
     metric_map: dict[int, dict[str, float]] = {}
     for item in latest_metrics:
         metric_map.setdefault(item.device_id, {})[item.metric_name] = item.value
 
+    # Build device health list for dashboard/monitoring UI
     device_health = []
     for device in devices:
         metrics = metric_map.get(device.id, {})
-
-        interfaces = []
-        for index in range(1, 49):
-            status_key = f"if_oper_status_{index}"
-            in_key = f"if_in_octets_{index}"
-            out_key = f"if_out_octets_{index}"
-
-            status = metrics.get(status_key)
-            in_octets = metrics.get(in_key)
-            out_octets = metrics.get(out_key)
-
-            if status is None and in_octets is None and out_octets is None:
-                continue
-
-            interfaces.append(
-                {
-                    "index": index,
-                    "status": int(status) if status is not None else None,
-                    "is_up": status == 1,
-                    "in_octets": round(float(in_octets), 2) if in_octets is not None else None,
-                    "out_octets": round(float(out_octets), 2) if out_octets is not None else None,
-                }
-            )
+        
+        # Determine status: Online (Green), Degraded (Yellow), or Offline (Red)
+        if device.is_up and device.degraded_status:
+            status = "Degraded"
+        elif device.is_up:
+            status = "Online"
+        else:
+            status = "Offline"
 
         device_health.append(
             {
                 "device_id": device.id,
                 "device_name": device.name,
                 "ip_address": device.ip_address,
-                "cpu_usage": round(float(metrics["cpu_usage"]), 2) if "cpu_usage" in metrics else None,
-                "memory_usage": round(float(metrics["memory_usage"]), 2) if "memory_usage" in metrics else None,
-                "uptime_ticks": int(round(float(metrics["uptime_ticks"]))) if "uptime_ticks" in metrics else None,
-                "interfaces": interfaces,
+                "status": status,
+                "is_up": device.is_up,
+                "degraded": device.degraded_status,
+                "cpu_usage": round(float(metrics.get("cpu_usage", 0)), 2) if "cpu_usage" in metrics else None,
+                "memory_usage": round(float(metrics.get("memory_usage", 0)), 2) if "memory_usage" in metrics else None,
+                "uptime_seconds": int(metrics.get("uptime_ticks", 0)) if "uptime_ticks" in metrics else None,
+                "location": device.location,
+                "vendor": device.vendor,
+                "device_type": device.device_type,
             }
         )
 
@@ -91,6 +91,7 @@ def _build_monitoring_payload() -> list[dict]:
 
 
 def _require_admin_web():
+    """Check if current user is admin, abort 403 if not."""
     if current_user.role != "admin":
         abort(403)
     return None
@@ -132,7 +133,7 @@ def login():
         if not user or not user.check_password(password):
             flash("Invalid username or password", "danger")
             return redirect(url_for("web.login"))
-        if user.is_disabled:
+        if not user.is_active:
             flash("Your account is disabled. Contact an administrator.", "danger")
             return redirect(url_for("web.login"))
 
@@ -152,18 +153,28 @@ def logout():
 @web_bp.get("/dashboard")
 @login_required
 def dashboard():
+    """
+    Dashboard view - completely standalone (Zabbix-free).
+    
+    Displays:
+    - Total device count
+    - Online device count
+    - Failed job count
+    - Recent alerts (last 10)
+    - Recent jobs (last 5) with per-device status
+    """
     devices = Device.query.order_by(Device.name.asc()).all()
-    monitor_payload = fetch_monitoring_snapshot(devices=devices, update_inventory=True)
-    zabbix_connected = monitor_payload.get("source") == "zabbix"
-    summary = monitor_payload.get("summary", {})
-    total_devices = summary.get("total_devices", len(devices))
-    up_devices = summary.get("devices_online", sum(1 for device in devices if device.is_up))
+    total_devices = len(devices)
+    up_devices = sum(1 for device in devices if device.is_up)
     failed_jobs = Job.query.filter_by(status="failed").count()
-    active_zabbix_alerts = summary.get("active_zabbix_alerts", 0)
     alerts = Alert.query.order_by(Alert.created_at.desc()).limit(10).all()
     recent_jobs = Job.query.order_by(Job.created_at.desc()).limit(5).all()
+    
+    # Get device objects for job results
     dashboard_device_ids = sorted({d for j in recent_jobs for d in j.get_device_ids()})
-    dashboard_devices = {d.id: d for d in Device.query.filter(Device.id.in_(dashboard_device_ids)).all()} if dashboard_device_ids else {}
+    dashboard_devices = {
+        d.id: d for d in Device.query.filter(Device.id.in_(dashboard_device_ids)).all()
+    } if dashboard_device_ids else {}
 
     recent_job_rows = []
     for job in recent_jobs:
@@ -184,10 +195,6 @@ def dashboard():
         total_devices=total_devices,
         up_devices=up_devices,
         failed_jobs=failed_jobs,
-        active_zabbix_alerts=active_zabbix_alerts,
-        zabbix_connected=zabbix_connected,
-        monitored_hosts=monitor_payload.get("hosts", []),
-        monitor_warning=monitor_payload.get("warning"),
         alerts=alerts,
         recent_jobs=recent_jobs,
         recent_job_rows=recent_job_rows,
@@ -197,24 +204,27 @@ def dashboard():
 @web_bp.get("/monitoring")
 @login_required
 def monitoring_page():
-    monitor_payload = fetch_monitoring_snapshot(update_inventory=False)
+    """
+    Monitoring page - displays real-time device metrics from local Metrics table.
+    
+    Complete metrics from SSH polling:
+    - CPU usage percentage
+    - Memory usage percentage
+    - Device uptime
+    - Online/Offline status
+    """
     return render_template(
         "monitoring.html",
         device_health=_build_monitoring_payload(),
-        zabbix_connected=monitor_payload.get("source") == "zabbix",
-        monitor_warning=monitor_payload.get("warning"),
     )
 
 
 @web_bp.get("/api/monitoring")
 @login_required
 def monitoring_api():
-    monitor_payload = fetch_monitoring_snapshot(update_inventory=False)
     return jsonify(
         {
             "devices": _build_monitoring_payload(),
-            "zabbix_connected": monitor_payload.get("source") == "zabbix",
-            "warning": monitor_payload.get("warning"),
         }
     )
 
@@ -222,6 +232,12 @@ def monitoring_api():
 @web_bp.route("/devices", methods=["GET", "POST"])
 @login_required
 def devices():
+    """
+    Device inventory list and management.
+    
+    GET: Display all devices with current status
+    POST: Add new device to inventory (operator+ only)
+    """
     if request.method == "POST":
         if current_user.role not in ("admin", "operator"):
             flash("You don't have permission to add devices.", "danger")
@@ -232,6 +248,7 @@ def devices():
         device_type = request.form.get("device_type", "router")
         vendor = request.form.get("vendor", "cisco")
         location = request.form.get("location", "").strip() or None
+        enable_secret = request.form.get("enable_secret", "").strip() or None
 
         if not name or not ip:
             flash("Name and IP are required.", "danger")
@@ -241,7 +258,14 @@ def devices():
             flash("IP already exists in inventory.", "danger")
             return redirect(url_for("web.devices"))
 
-        d = Device(name=name, ip_address=ip, device_type=device_type, vendor=vendor, location=location)
+        d = Device(
+            name=name,
+            ip_address=ip,
+            device_type=device_type,
+            vendor=vendor,
+            location=location,
+            enable_secret=enable_secret,
+        )
         db.session.add(d)
         db.session.commit()
         flash("Device added.", "success")
@@ -254,7 +278,6 @@ def devices():
     return render_template(
         "pages/devices.html",
         devices=inventory,
-        monitor_warning=monitor_payload.get("warning"),
         status_map=status_map,
     )
 
@@ -262,10 +285,15 @@ def devices():
 @web_bp.post("/devices/<int:device_id>/delete")
 @login_required
 def device_delete(device_id: int):
-    """Hard-delete a device and its related rows.
-
-    Models do not define ORM cascades, and SQLite FK behavior can vary
-    depending on configuration. We therefore delete related rows explicitly.
+    """
+    Hard-delete a device and its related rows.
+    
+    Deletes:
+    - Alerts associated with device
+    - Config snapshots
+    - Jobs
+    - Metrics
+    - Device record itself
     """
     if current_user.role not in ("admin", "operator"):
         flash("You don't have permission to delete devices.", "danger")
@@ -278,6 +306,7 @@ def device_delete(device_id: int):
     Alert.query.filter_by(device_id=device.id).delete(synchronize_session=False)
     ConfigSnapshot.query.filter_by(device_id=device.id).delete(synchronize_session=False)
     Job.query.filter_by(device_id=device.id).delete(synchronize_session=False)
+    Metrics.query.filter_by(device_id=device.id).delete(synchronize_session=False)
     db.session.delete(device)
     db.session.commit()
     flash(f"Device {device.name} removed.", "success")
@@ -432,6 +461,7 @@ def jobs_page():
 @web_bp.get("/jobs/<int:job_id>")
 @login_required
 def job_detail_page(job_id: int):
+    """Display detailed job execution results with error categorization."""
     job = Job.query.get(job_id)
     if job is None:
         abort(404)
@@ -452,7 +482,13 @@ def job_detail_page(job_id: int):
             }
         )
 
-    return render_template("pages/job_detail.html", job=job, devices=devices, per_device=per_device)
+    return render_template(
+        "pages/job_detail.html", 
+        job=job, 
+        devices=devices, 
+        per_device=per_device,
+        error_summary=job.error_summary,  # Explicitly pass error categorization for UX
+    )
 
 
 @web_bp.get("/alerts")
@@ -509,111 +545,25 @@ def alerts_clear():
 @web_bp.route("/admin/users", methods=["GET", "POST"])
 @login_required
 def admin_users_page():
+    """Admin user management page."""
     guard = _require_admin_web()
     if guard is not None:
         return guard
 
     if request.method == "POST":
-        ok, message = _create_user_from_form()
-        flash(message, "success" if ok else "danger")
-        return redirect(url_for("web.admin_users_page"))
-
-    users = User.query.order_by(User.username.asc()).all()
-    return render_template("pages/admin_users.html", users=users)
-
-
-@web_bp.post("/admin/users/create")
-@login_required
-def admin_user_create():
-    guard = _require_admin_web()
-    if guard is not None:
-        return guard
-
-    ok, message = _create_user_from_form()
-    flash(message, "success" if ok else "danger")
-    return redirect(url_for("web.admin_users_page"))
-
-
-@web_bp.post("/admin/users/<int:user_id>/role")
-@login_required
-def admin_user_update_role(user_id: int):
-    guard = _require_admin_web()
-    if guard is not None:
-        return guard
-
-    user = User.query.get(user_id)
-    if user is None:
-        abort(404)
-
-    role = (request.form.get("role") or "").strip()
-    if role not in ("admin", "operator", "viewer"):
-        flash("Invalid role.", "danger")
-        return redirect(url_for("web.admin_users_page"))
-
-    user.role = role
-    db.session.commit()
-    flash(f"Role updated for {user.username}.", "success")
-    return redirect(url_for("web.admin_users_page"))
-
-
-@web_bp.post("/admin/users/<int:user_id>/toggle")
-@login_required
-def admin_user_toggle(user_id: int):
-    guard = _require_admin_web()
-    if guard is not None:
-        return guard
-
-    user = User.query.get(user_id)
-    if user is None:
-        abort(404)
-
-    if user.id == current_user.id and user.role != "disabled":
-        flash("You cannot disable your own account.", "danger")
-        return redirect(url_for("web.admin_users_page"))
-
-    if user.role == "disabled":
-        user.role = "viewer"
-        db.session.commit()
-        flash(f"User {user.username} enabled with viewer role.", "success")
-        return redirect(url_for("web.admin_users_page"))
-
-    user.role = "disabled"
-    db.session.commit()
-    flash(f"User {user.username} disabled.", "success")
-    return redirect(url_for("web.admin_users_page"))
-
-
-@web_bp.post("/admin/users/<int:user_id>/delete")
-@login_required
-def admin_user_delete(user_id: int):
-    guard = _require_admin_web()
-    if guard is not None:
-        return guard
-
-    user = User.query.get(user_id)
-    if user is None:
-        abort(404)
-
-    if user.id == current_user.id:
-        flash("You cannot delete your own account.", "danger")
-        return redirect(url_for("web.admin_users_page"))
-
-    if user.role == "admin":
-        admin_count = User.query.filter_by(role="admin").count()
-        if admin_count <= 1:
-            flash("Cannot delete the last admin account.", "danger")
+        success, msg = _create_user_from_form()
+        flash(msg, "success" if success else "danger")
+        if success:
             return redirect(url_for("web.admin_users_page"))
 
-    username = user.username
-    db.session.delete(user)
-    db.session.commit()
-    flash(f"User {username} deleted.", "success")
-    return redirect(url_for("web.admin_users_page"))
+    users = User.query.order_by(User.created_at.desc()).all()
+    return render_template("pages/admin_users.html", users=users)
 
 
 @web_bp.post("/admin/users/<int:user_id>/disable")
 @login_required
 def admin_user_disable(user_id: int):
+    """Disable a user account (admin only)."""
     guard = _require_admin_web()
     if guard is not None:
         return guard
@@ -621,12 +571,11 @@ def admin_user_disable(user_id: int):
     user = User.query.get(user_id)
     if user is None:
         abort(404)
-
     if user.id == current_user.id:
-        flash("You cannot disable your own account.", "danger")
+        flash("Cannot disable your own account.", "danger")
         return redirect(url_for("web.admin_users_page"))
 
-    user.role = "disabled"
+    user.active = False
     db.session.commit()
     flash(f"User {user.username} disabled.", "success")
     return redirect(url_for("web.admin_users_page"))
@@ -635,6 +584,7 @@ def admin_user_disable(user_id: int):
 @web_bp.post("/admin/users/<int:user_id>/enable")
 @login_required
 def admin_user_enable(user_id: int):
+    """Re-enable a user account (admin only)."""
     guard = _require_admin_web()
     if guard is not None:
         return guard
@@ -643,11 +593,7 @@ def admin_user_enable(user_id: int):
     if user is None:
         abort(404)
 
-    if user.role != "disabled":
-        flash("User is already enabled.", "info")
-        return redirect(url_for("web.admin_users_page"))
-
-    user.role = "viewer"
+    user.active = True
     db.session.commit()
-    flash(f"User {user.username} enabled with viewer role.", "success")
+    flash(f"User {user.username} enabled.", "success")
     return redirect(url_for("web.admin_users_page"))
