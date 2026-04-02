@@ -252,19 +252,23 @@ def _fetch_metrics_via_ssh(device: Device) -> dict[str, Any]:
             fast_cli=False,
         )
         
-        # Enable privilege mode
+        # Enable privilege mode explicitly
         conn.enable()
         
-        # Fetch CPU usage
-        cpu_output = conn.send_command("show processes cpu", read_timeout=timeout)
+        # Dynamically discover the prompt to be resilient to hostname/mode changes
+        base_prompt = conn.find_prompt()
+        current_app.logger.debug(f"[MONITOR] Device {device.name} prompt: {base_prompt}")
+        
+        # Fetch CPU usage with dynamic expect_string for robust prompt detection
+        cpu_output = conn.send_command("show processes cpu", read_timeout=timeout, expect_string=r'[#>]')
         cpu = _parse_cisco_cpu(cpu_output)
         
-        # Fetch memory usage
-        memory_output = conn.send_command("show memory", read_timeout=timeout)
+        # Fetch memory usage with dynamic expect_string
+        memory_output = conn.send_command("show memory", read_timeout=timeout, expect_string=r'[#>]')
         memory = _parse_cisco_memory(memory_output)
         
-        # Fetch uptime
-        uptime_output = conn.send_command("show version", read_timeout=timeout)
+        # Fetch uptime with dynamic expect_string
+        uptime_output = conn.send_command("show version", read_timeout=timeout, expect_string=r'[#>]')
         uptime = _parse_uptime(uptime_output)
         
         current_app.logger.info(

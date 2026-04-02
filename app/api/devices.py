@@ -84,8 +84,9 @@ def _capture_checkpoint(device: Device) -> tuple[bool, ConfigSnapshot | None, st
     return True, snapshot, ""
 
 
-def _create_job(device_id: int, job_type: str, payload: dict, device_ids: list[int] | None = None) -> Job:
+def _create_job(device_id: int, job_type: str, payload: dict, device_ids: list[int] | None = None, user_id: int | None = None) -> Job:
     job = Job(
+        user_id=user_id or current_user.id,
         device_id=device_id,
         type=job_type,
         payload_json=json.dumps(payload),
