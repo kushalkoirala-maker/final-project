@@ -297,13 +297,18 @@ def push_config_commands(
     Workflow:
     1. Connect and enter privilege mode
     2. Verify privilege mode with check_enable_mode()
-    3. Send configuration commands
+    3. Send configuration commands with cmd_verify=True
     4. Save configuration to startup
     5. Log all operations
     
     Error Handling:
     - Catches NetmikoTimeoutException, NetmikoAuthenticationException
     - Returns clean error dicts (no 500 errors thrown)
+    
+    Key Technical Details:
+    - enable() is explicitly called via _connect_and_enable() before config mode
+    - cmd_verify=True ensures Netmiko confirms each command via prompt detection
+    - find_prompt() is used dynamically to detect hostname changes
     
     Args:
         device: Device ORM model or dict
@@ -327,10 +332,10 @@ def push_config_commands(
     try:
         conn = _connect_and_enable(device_payload, timeout, config=config, device_obj=device)
         
-        # Get current prompt for logging
-        prompt = conn.find_prompt()
+        # Get current prompt for logging - this is dynamic and resilient to hostname changes
+        base_prompt = conn.find_prompt()
         current_app.logger.info(
-            f"[AUTOMATION] Connected to {device_payload.get('name')} ({device_payload.get('ip_address')}) - Prompt: {prompt}"
+            f"[AUTOMATION] Connected to {device_payload.get('name')} ({device_payload.get('ip_address')}) - Prompt: {base_prompt}"
         )
         
         # Explicitly verify privilege mode before config push
@@ -352,8 +357,15 @@ def push_config_commands(
                 commands=commands,
             )
         
-        # Send config commands
-        config_output = conn.send_config_set(commands, read_timeout=timeout)
+        # Send config commands with cmd_verify=True for robust prompt detection
+        # This prevents buffer desync and handles prompt changes gracefully
+        config_output = conn.send_config_set(
+            commands,
+            enter_config_mode=True,
+            exit_config_mode=True,
+            cmd_verify=True,
+            read_timeout=timeout
+        )
         save_output = _save_running_config(conn, timeout)
         output = "\n".join(part for part in [config_output, save_output] if part)
         
@@ -364,7 +376,7 @@ def push_config_commands(
         return _result(
             True,
             output=output,
-            prompt=prompt,
+            prompt=base_prompt,
             device_id=device_payload.get("id"),
             device_name=device_payload.get("name"),
             commands=commands,

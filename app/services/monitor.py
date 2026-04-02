@@ -477,6 +477,37 @@ def _fetch_with_ping_fallback(devices: list[Device], config: dict[str, Any]) -> 
     }
 
 
+def _monitor_worker(app, device: Device) -> dict[str, Any]:
+    """
+    Worker function for monitoring with explicit Flask app context.
+    
+    This wrapper ensures each thread has access to the Flask app context,
+    allowing database queries and app.logger to work correctly.
+    
+    Args:
+        app: The Flask application object (not a proxy)
+        device: Device ORM model
+    
+    Returns:
+        Metrics dict with success, is_up, cpu, memory, uptime, etc.
+    """
+    with app.app_context():
+        try:
+            return _fetch_metrics_via_ssh(device)
+        except Exception as exc:
+            app.logger.error(f"[MONITOR] Worker error for {device.name}: {exc}")
+            return {
+                "device_id": device.id,
+                "success": False,
+                "is_up": False,
+                "degraded": True,
+                "cpu": None,
+                "memory": None,
+                "uptime": None,
+                "error": str(exc),
+            }
+
+
 def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_inventory: bool = True) -> dict:
     """
     Fetch monitoring snapshot using Netmiko SSH or fallback to ping.
@@ -500,9 +531,13 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
         # Parallel SSH monitoring using Netmiko
         metrics_results: dict[int, dict[str, Any]] = {}
         
+        # Extract the actual app object from the current_app proxy
+        # This is essential because threads cannot use the proxy directly
+        app = current_app._get_current_object()
+        
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="monitor-ssh") as executor:
             future_map = {
-                executor.submit(_fetch_metrics_via_ssh, device): device.id
+                executor.submit(_monitor_worker, app, device): device.id
                 for device in devices
             }
             
