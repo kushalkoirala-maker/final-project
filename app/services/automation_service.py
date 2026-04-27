@@ -167,6 +167,7 @@ def _connect_params(
         "banner_timeout": timeout,
         "timeout": timeout,
         "fast_cli": False,
+        "global_delay_factor": 2,
     }
 
 

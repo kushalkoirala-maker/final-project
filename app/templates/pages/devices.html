@@ -72,8 +72,7 @@
       </thead>
       <tbody>
         {% for d in devices %}
-        {% set live = status_map.get(d.id, {}) %}
-        {% set is_online = live.get('status') == 'Online' or d.is_up %}
+        {% set is_online = d.is_up %}
         <tr>
           <td>
             <a class="fw-semibold text-decoration-none" href="{{ url_for('web.device_detail', device_id=d.id) }}">{{ d.name }}</a>
@@ -83,8 +82,8 @@
           <td class="text-capitalize">{{ d.vendor }}</td>
           <td>{{ d.location or "-" }}</td>
           <td>
-            <span class="badge rounded-pill {{ 'bg-success' if is_online else 'bg-danger' }}">
-              {{ "Online" if is_online else "Offline" }}
+            <span class="badge rounded-pill {{ 'bg-warning text-dark' if d.is_up and d.degraded_status else ('bg-success' if is_online else 'bg-danger') }}">
+              {{ "Degraded" if d.is_up and d.degraded_status else ("Online" if is_online else "Offline") }}
             </span>
           </td>
           <td>

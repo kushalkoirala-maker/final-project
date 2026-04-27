@@ -2,6 +2,7 @@ import platform
 import random
 import re
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -22,6 +23,9 @@ from ..models.metrics import Metrics
 
 
 scheduler = BackgroundScheduler()
+monitor_dispatch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="monitor-dispatch")
+monitor_dispatch_lock = threading.Lock()
+monitor_dispatch_future = None
 
 
 def _ping(ip: str, timeout_ms: int = 800) -> bool:
@@ -230,7 +234,7 @@ def _fetch_metrics_via_ssh(device: Device) -> dict[str, Any]:
             "error": f"Unsupported vendor/device type: {device.vendor}/{device.device_type}",
         }
 
-    timeout = int(current_app.config.get("MONITOR_SSH_TIMEOUT_SECONDS", 15))
+    timeout = int(current_app.config.get("MONITOR_SSH_TIMEOUT_SECONDS", 20))
     conn = None
     try:
         # Enterprise: Add network jitter to prevent SYN flooding when ThreadPoolExecutor spins up
@@ -250,13 +254,15 @@ def _fetch_metrics_via_ssh(device: Device) -> dict[str, Any]:
             banner_timeout=timeout,
             timeout=timeout,
             fast_cli=False,
+            global_delay_factor=2,
         )
         
         # Enable privilege mode explicitly
         conn.enable()
+        conn.clear_buffer()
         
         # Dynamically discover the prompt to be resilient to hostname/mode changes
-        base_prompt = conn.find_prompt()
+        base_prompt = conn.find_prompt(delay_factor=2)
         current_app.logger.debug(f"[MONITOR] Device {device.name} prompt: {base_prompt}")
         
         # Fetch CPU usage with dynamic expect_string for robust prompt detection
@@ -529,7 +535,7 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
     status_by_id: dict[int, bool] = {}
     degraded_by_id: dict[int, bool] = {}
     hosts_payload = []
-    max_workers = int(config.get("MONITOR_MAX_WORKERS", 5))
+    max_workers = int(config.get("MONITOR_MAX_WORKERS", 15))
     
     try:
         # Parallel SSH monitoring using Netmiko
@@ -615,10 +621,35 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
     return payload
 
 
-def poll_devices() -> None:
-    """Poll all devices for monitoring data."""
-    devices = Device.query.order_by(Device.id.asc()).all()
-    fetch_monitoring_snapshot(devices=devices, update_inventory=True)
+def _run_poll_cycle(app) -> None:
+    """Execute one full monitoring cycle inside its own app context."""
+    with app.app_context():
+        devices = Device.query.order_by(Device.id.asc()).all()
+        fetch_monitoring_snapshot(devices=devices, update_inventory=True)
+
+
+def _log_monitor_completion(app, future) -> None:
+    """Log any background polling failure without crashing the scheduler thread."""
+    try:
+        future.result()
+    except Exception as exc:
+        app.logger.warning(f"[MONITOR] Background polling task failed: {exc}")
+
+
+def poll_devices() -> bool:
+    """Queue one monitoring cycle if another polling run is not already active."""
+    global monitor_dispatch_future
+
+    app = current_app._get_current_object()
+
+    with monitor_dispatch_lock:
+        if monitor_dispatch_future is not None and not monitor_dispatch_future.done():
+            current_app.logger.info("[MONITOR] Previous polling cycle still running; skipping new dispatch")
+            return False
+
+        monitor_dispatch_future = monitor_dispatch_executor.submit(_run_poll_cycle, app)
+        monitor_dispatch_future.add_done_callback(lambda future, app=app: _log_monitor_completion(app, future))
+        return True
 
 
 def start_monitor(app) -> None:
@@ -626,11 +657,19 @@ def start_monitor(app) -> None:
         return
 
     with app.app_context():
-        interval = app.config.get("MONITOR_INTERVAL_SECONDS", 10)
+        interval = app.config.get("MONITOR_INTERVAL_SECONDS", 30)
 
     def job_wrapper():
         with app.app_context():
             poll_devices()
 
-    scheduler.add_job(job_wrapper, "interval", seconds=interval, id="device_monitor", replace_existing=True)
+    scheduler.add_job(
+        job_wrapper,
+        "interval",
+        seconds=interval,
+        id="device_monitor",
+        replace_existing=True,
+        max_instances=3,
+        misfire_grace_time=10,
+    )
     scheduler.start()

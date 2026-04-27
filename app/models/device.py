@@ -16,6 +16,7 @@ class Device(db.Model):
         db.Index("ix_device_name", "name"),
         db.Index("ix_device_created_at", "created_at"),
         db.Index("ix_device_last_seen", "last_seen"),
+        db.Index("ix_device_is_up", "is_up"),
     )
 
     id = db.Column(db.Integer, primary_key=True)

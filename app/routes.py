@@ -11,7 +11,6 @@ from .models.device import Device
 from .models.job import Job
 from .models.metrics import Metrics
 from .models.user import User
-from .services.monitor import fetch_monitoring_snapshot
 from .services.template_engine import TEMPLATE_MAP, available_templates, template_schema_map
 
 web_bp = Blueprint("web", __name__)
@@ -272,13 +271,10 @@ def devices():
         return redirect(url_for("web.devices"))
 
     inventory = Device.query.order_by(Device.created_at.desc()).all()
-    monitor_payload = fetch_monitoring_snapshot(devices=inventory, update_inventory=True)
-    status_map = {item.get("device_id"): item for item in monitor_payload.get("hosts", [])}
 
     return render_template(
         "pages/devices.html",
         devices=inventory,
-        status_map=status_map,
     )
 
 

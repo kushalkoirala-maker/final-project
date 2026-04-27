@@ -28,13 +28,13 @@ class Config:
 
     # ==== Standalone SSH Monitoring (Direct Netmiko-Based) ====
     # Polling interval in seconds for device metrics collection
-    MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "10"))
+    MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "30"))
     # SSH timeout per device for data collection
-    MONITOR_SSH_TIMEOUT_SECONDS = int(os.getenv("MONITOR_SSH_TIMEOUT_SECONDS", "15"))
+    MONITOR_SSH_TIMEOUT_SECONDS = int(os.getenv("MONITOR_SSH_TIMEOUT_SECONDS", "20"))
     # ICMP ping timeout (used as fallback if SSH fails)
     MONITOR_PING_TIMEOUT_MS = int(os.getenv("MONITOR_PING_TIMEOUT_MS", "800"))
     # Number of concurrent worker threads for parallel device polling
-    MONITOR_MAX_WORKERS = int(os.getenv("MONITOR_MAX_WORKERS", "5"))
+    MONITOR_MAX_WORKERS = int(os.getenv("MONITOR_MAX_WORKERS", "15"))
     
     # ==== Job Worker (Background Task Processing) ====
     # Polling interval for job status updates
