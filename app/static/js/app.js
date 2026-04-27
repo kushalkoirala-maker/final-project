@@ -515,6 +515,50 @@
     });
   }
 
+  function initCaptureSnapshotButton() {
+    var btn = document.getElementById("capture-snapshot-btn");
+    if (!btn) {
+      return;
+    }
+
+    var statusEl = document.getElementById("capture-status");
+    var endpoint = btn.getAttribute("data-endpoint");
+
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      statusEl.textContent = "Requesting snapshot capture job...";
+      statusEl.className = "text-info mt-2 small";
+
+      fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin"
+      })
+        .then(function (response) {
+          return readJsonSafe(response).then(function (data) {
+            return { ok: response.ok, status: response.status, data: data };
+          });
+        })
+        .then(function (res) {
+          if (!res.ok || !res.data.success) {
+            statusEl.textContent = "Error: " + ((res.data && res.data.error) || "Failed to start snapshot job.");
+            statusEl.className = "text-danger mt-2 small";
+            return;
+          }
+          var jobId = res.data.job_id;
+          statusEl.innerHTML = '<span class="text-success">✓ Job #' + jobId + ' started.</span> <a href="/jobs/' + jobId + '" class="btn-link ms-2">View Job Status</a>';
+          statusEl.className = "text-success mt-2 small";
+        })
+        .catch(function (err) {
+          statusEl.textContent = "Request failed: " + String(err);
+          statusEl.className = "text-danger mt-2 small";
+        })
+        .finally(function () {
+          btn.disabled = false;
+        });
+    });
+  }
+
   function initRollbackButton() {
     var btn = document.getElementById("rollback-latest-btn");
     if (!btn) {
@@ -573,7 +617,7 @@
     }
 
     var titleEl = document.getElementById("terminalModalTitle");
-    var bodyEl = document.getElementById("terminalModalBody");
+    var bodyEl = document.getElementById("terminal-output-content");
 
     modal.addEventListener("show.bs.modal", function (event) {
       var trigger = event.relatedTarget;
@@ -589,9 +633,17 @@
       if (trigger.classList.contains("connection-test-btn")) {
         var deviceId = trigger.getAttribute("data-device-id");
         var deviceName = trigger.getAttribute("data-device-name") || "Device";
-        titleEl.textContent = deviceName + " Test Connection";
-        bodyEl.textContent = "Testing SSH and enable credentials...";
+        
+        // Update title
+        if (titleEl) titleEl.textContent = "Testing Connection: " + deviceName;
+        
+        // 1. Reset UI immediately with loading message
+        if (bodyEl) {
+          bodyEl.textContent = ">>> Establishing SSH session with " + deviceName + "...\n>>> Please wait (10-15 seconds)...";
+          bodyEl.style.color = "#00ff00"; // Reset to green
+        }
 
+        // 2. Execute the API call
         fetch("/api/devices/" + deviceId + "/test-connection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -603,16 +655,22 @@
             });
           })
           .then(function (result) {
-            if (result.ok && result.data && result.data.success) {
-              bodyEl.textContent = result.data.output || ("Prompt: " + (result.data.prompt || "unknown"));
-              return;
+            if (bodyEl) {
+              if (result.ok && result.data && result.data.success) {
+                bodyEl.textContent = result.data.output || "Connection successful! No output returned.";
+                bodyEl.style.color = "#00ff00"; // Green for success
+              } else {
+                bodyEl.style.color = "#ff4444"; // Red for error
+                var errorMessage = formatApiError(result.data, "Connection test failed.");
+                bodyEl.textContent = "CONNECTION FAILED:\n" + errorMessage;
+              }
             }
-
-            var errorMessage = formatApiError(result.data, "Connection test failed.");
-            bodyEl.textContent = "Connection failed (HTTP " + result.status + ").\n\n" + errorMessage;
           })
           .catch(function (err) {
-            bodyEl.textContent = "Connection test request failed.\n\n" + String(err);
+            if (bodyEl) {
+              bodyEl.style.color = "#ff4444"; // Red for error
+              bodyEl.textContent = "SYSTEM ERROR:\nCould not reach the automation service.\n" + String(err);
+            }
           });
       }
 
@@ -649,6 +707,7 @@
   initJobDetailPolling();
   initTemplatesTool();
   initJobsCreateForm();
+  initCaptureSnapshotButton();
   initRollbackButton();
   initTerminalModal();
 })();

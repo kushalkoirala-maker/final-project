@@ -550,6 +550,36 @@ def apply_template_to_device(device_id: int):
     return jsonify({"success": True, "job": _serialize_job(job)}), 202
 
 
+@api_devices_bp.post("/devices/<int:device_id>/snapshot")
+@login_required
+def create_snapshot_job_api(device_id: int):
+    """
+    Triggers a background job to capture a full configuration snapshot via SSH.
+    Enterprise Logic: Uses background workers to prevent UI timeout during long SSH sessions.
+    """
+    if current_user.role not in ("admin", "operator"):
+        return jsonify({"error": "forbidden"}), 403
+
+    device = Device.query.get(device_id)
+    if device is None:
+        return jsonify({"error": "device not found"}), 404
+
+    # Create the job record with capture_snapshot type
+    payload = {"command": "show running-config"}
+    job = _create_job(device.id, "capture_snapshot", payload, device_ids=[device.id])
+    
+    # Submit to the ThreadPoolExecutor
+    submit_job(job.id, current_app._get_current_object())
+    _audit("info", f"Snapshot capture job queued for {device.name} (job #{job.id})", device.id)
+
+    return jsonify({
+        "success": True, 
+        "message": f"Snapshot job for {device.name} started.", 
+        "job_id": job.id,
+        "job": _serialize_job(job)
+    }), 202
+
+
 @api_devices_bp.post("/jobs")
 @login_required
 def create_job():

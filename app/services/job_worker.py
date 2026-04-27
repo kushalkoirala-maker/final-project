@@ -356,6 +356,77 @@ def _execute_apply_template_parallel(app, job: Job, payload: dict) -> None:
     )
 
 
+def _execute_capture_snapshot(app, job: Job) -> None:
+    """Executes the SSH capture and saves to ConfigSnapshot table."""
+    from ..api.devices import _audit, _truncate_output
+    from ..models.config_snapshot import ConfigSnapshot
+    import hashlib
+    
+    with app.app_context():
+        device = Device.query.get(job.device_id)
+        if device is None:
+            _mark_job_finished(job, False, {"error": "device not found"})
+            return
+        
+        device_name = device.name
+        
+        # Use existing SSH show command service
+        result = run_show_command(device, "show running-config", timeout=20)
+        
+        if not result.get("success"):
+            error_msg = result.get("error", "Unknown SSH error")
+            error_truncated, _ = _truncate_output(error_msg, 4_000)
+            _audit("crit", f"Snapshot capture failed for {device_name}: {error_truncated}", device.id)
+            _mark_job_finished(job, False, {
+                "error": error_truncated,
+                "device_id": device.id,
+                "device_name": device_name
+            })
+            return
+
+        config_text = result.get("output", "")
+        if not config_text:
+            _audit("warn", f"Snapshot capture returned empty config for {device_name}", device.id)
+            _mark_job_finished(job, False, {
+                "error": "SSH returned empty configuration",
+                "device_id": device.id,
+                "device_name": device_name
+            })
+            return
+
+        # Generate hash for audit and integrity verification
+        config_hash = hashlib.sha256(config_text.encode()).hexdigest()
+
+        try:
+            new_snapshot = ConfigSnapshot(
+                device_id=device.id,
+                config_text=config_text,
+                config_hash=config_hash
+            )
+            db.session.add(new_snapshot)
+            db.session.commit()
+            
+            _audit("info", f"Configuration snapshot captured for {device_name} (snapshot #{new_snapshot.id})", device.id)
+            _mark_job_finished(job, True, {
+                "snapshot_id": new_snapshot.id,
+                "config_hash": config_hash,
+                "config_size_bytes": len(config_text),
+                "device_id": device.id,
+                "device_name": device_name,
+                "message": f"Snapshot #{new_snapshot.id} successfully created"
+            })
+        except Exception as exc:
+            db.session.rollback()
+            error_msg = f"Failed to save snapshot: {exc}"
+            current_app.logger.error(f"[JOB] Job {job.id} - {error_msg}")
+            _audit("crit", f"Snapshot save failed for {device_name}: {error_msg}", device.id)
+            _mark_job_finished(job, False, {
+                "error": error_msg,
+                "device_id": device.id,
+                "device_name": device_name
+            })
+
+
 def _execute_job(app, job: Job) -> None:
     try:
         payload = json.loads(job.payload_json or "{}")
@@ -365,6 +436,10 @@ def _execute_job(app, job: Job) -> None:
 
     if job.type == "apply_template":
         _execute_apply_template_parallel(app, job, payload)
+        return
+    
+    if job.type == "capture_snapshot":
+        _execute_capture_snapshot(app, job)
         return
 
     _mark_job_finished(job, False, {"error": f"unsupported job type: {job.type}"})

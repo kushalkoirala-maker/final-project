@@ -20,6 +20,16 @@
     <p id="rollback-jobs-link"></p>
     <pre id="rollback-output" class="output-box mb-0"></pre>
   </div>
+  
+  <div class="panel-card mb-4">
+    <h3 class="panel-title">Capture New State</h3>
+    <p class="text-muted small mb-3">Capture the current running configuration to create a new snapshot for comparison or rollback.</p>
+    <button class="btn btn-primary btn-sm mt-2" id="capture-snapshot-btn" 
+            data-endpoint="{{ url_for('api_devices.create_snapshot_job_api', device_id=device.id) }}">
+      <i class="bi bi-camera me-1"></i> Capture Configuration
+    </button>
+    <p id="capture-status" class="text-secondary mt-2 small"></p>
+  </div>
   {% endif %}
 
   <div class="panel-card">
