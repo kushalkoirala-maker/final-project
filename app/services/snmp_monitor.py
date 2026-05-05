@@ -182,7 +182,19 @@ def start_snmp_monitor(app) -> None:
 
     def job_wrapper():
         with app.app_context():
-            poll_all_devices()
+            try:
+                poll_all_devices()
+            finally:
+                db.session.remove()
 
-    scheduler.add_job(job_wrapper, "interval", seconds=interval, id="snmp_monitor", replace_existing=True)
+    scheduler.add_job(
+        job_wrapper,
+        "interval",
+        seconds=interval,
+        id="snmp_monitor",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=15,
+        coalesce=True,
+    )
     scheduler.start()

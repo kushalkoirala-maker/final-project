@@ -1,10 +1,11 @@
+import logging
 import os
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from flask import current_app
+from flask import current_app, has_app_context
 
 try:
     from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticationException  # type: ignore
@@ -15,6 +16,15 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 DEFAULT_TIMEOUT_SECONDS = 15
+logger = logging.getLogger(__name__)
+
+
+def _log(level: str, message: str) -> None:
+    """Log safely from request, scheduler, or plain executor threads."""
+    if has_app_context():
+        getattr(current_app.logger, level)(message)
+    else:
+        getattr(logger, level)(message)
 
 
 def _result(success: bool, output: str = "", error: str = "", **extra: Any) -> dict:
@@ -91,7 +101,9 @@ def get_connection_credentials(
     
     # Prefer device-specific enable_secret, fall back to global config
     secret = None
-    if device and hasattr(device, 'enable_secret') and device.enable_secret:
+    if isinstance(device, dict) and device.get("enable_secret"):
+        secret = device.get("enable_secret")
+    elif device and hasattr(device, 'enable_secret') and device.enable_secret:
         secret = device.enable_secret
     else:
         secret = (
@@ -116,6 +128,7 @@ def serialize_device(device: Any) -> dict[str, Any]:
             "vendor": device.get("vendor"),
             "device_type": device.get("device_type"),
             "ssh_port": device.get("ssh_port", 22),
+            "enable_secret": device.get("enable_secret"),
         }
 
     return {
@@ -125,6 +138,7 @@ def serialize_device(device: Any) -> dict[str, Any]:
         "vendor": getattr(device, "vendor", None),
         "device_type": getattr(device, "device_type", None),
         "ssh_port": getattr(device, "ssh_port", 22),
+        "enable_secret": getattr(device, "enable_secret", None),
     }
 
 
@@ -199,6 +213,7 @@ def _connect_and_enable(
     conn = ConnectHandler(**params)
     conn.secret = params["secret"]
     conn.enable()
+    time.sleep(0.25)
     return conn
 
 
@@ -231,7 +246,12 @@ def run_show_command(
     try:
         conn = _connect_and_enable(device_payload, timeout, config=config, device_obj=device)
         prompt = conn.find_prompt()
-        output = conn.send_command(command, read_timeout=timeout)
+        output = conn.send_command(
+            command,
+            read_timeout=timeout,
+            expect_string=r"#",
+            delay_factor=2,
+        )
         return _result(
             True,
             output=output,
@@ -241,7 +261,7 @@ def run_show_command(
         )
     except NetmikoTimeoutException as exc:
         error_msg = f"Connection timeout after {timeout}s: {str(exc)}"
-        current_app.logger.warning(f"[AUTOMATION] Timeout on {device_payload.get('name')}: {error_msg}")
+        _log("warning", f"[AUTOMATION] Timeout on {device_payload.get('name')}: {error_msg}")
         return _result(
             False,
             error=error_msg,
@@ -250,7 +270,7 @@ def run_show_command(
         )
     except NetmikoAuthenticationException as exc:
         error_msg = f"SSH authentication failed: {str(exc)}"
-        current_app.logger.error(f"[AUTOMATION] Auth failure on {device_payload.get('name')}: {error_msg}")
+        _log("error", f"[AUTOMATION] Auth failure on {device_payload.get('name')}: {error_msg}")
         return _result(
             False,
             error=error_msg,
@@ -259,7 +279,7 @@ def run_show_command(
         )
     except Exception as exc:
         error_msg = f"Netmiko error: {str(exc)}"
-        current_app.logger.error(f"[AUTOMATION] Command execution failed on {device_payload.get('name')}: {error_msg}")
+        _log("error", f"[AUTOMATION] Command execution failed on {device_payload.get('name')}: {error_msg}")
         return _result(
             False,
             error=error_msg,
@@ -283,7 +303,12 @@ def _save_running_config(conn: Any, timeout: int) -> str:
     try:
         return conn.save_config()
     except Exception:
-        return conn.send_command("write memory", read_timeout=timeout)
+        return conn.send_command(
+            "write memory",
+            read_timeout=timeout,
+            expect_string=r"#",
+            delay_factor=2,
+        )
 
 
 def push_config_commands(
@@ -335,21 +360,22 @@ def push_config_commands(
         
         # Get current prompt for logging - this is dynamic and resilient to hostname changes
         base_prompt = conn.find_prompt()
-        current_app.logger.info(
+        _log("info",
             f"[AUTOMATION] Connected to {device_payload.get('name')} ({device_payload.get('ip_address')}) - Prompt: {base_prompt}"
         )
         
         # Explicitly verify privilege mode before config push
         if not conn.check_enable_mode():
-            current_app.logger.warning(
+            _log("warning",
                 f"[AUTOMATION] Device {device_payload.get('name')} not in enable mode, attempting enable again"
             )
             conn.enable()
+            time.sleep(0.25)
         
         # Re-verify after second enable attempt
         if not conn.check_enable_mode():
             error_msg = "Failed to enter privilege mode after enable() call"
-            current_app.logger.error(f"[AUTOMATION] {error_msg} - {device_payload.get('name')}")
+            _log("error", f"[AUTOMATION] {error_msg} - {device_payload.get('name')}")
             return _result(
                 False,
                 error=error_msg,
@@ -365,12 +391,13 @@ def push_config_commands(
             enter_config_mode=True,
             exit_config_mode=True,
             cmd_verify=True,
-            read_timeout=timeout
+            read_timeout=timeout,
+            delay_factor=2,
         )
         save_output = _save_running_config(conn, timeout)
         output = "\n".join(part for part in [config_output, save_output] if part)
         
-        current_app.logger.info(
+        _log("info",
             f"[AUTOMATION] Configuration successfully pushed to {device_payload.get('name')} - Commands: {len(commands)}"
         )
         
@@ -386,7 +413,7 @@ def push_config_commands(
     
     except NetmikoTimeoutException as exc:
         error_msg = f"Connection timeout during config push: {str(exc)}"
-        current_app.logger.error(f"[AUTOMATION] Timeout on {device_payload.get('name')}: {error_msg}")
+        _log("error", f"[AUTOMATION] Timeout on {device_payload.get('name')}: {error_msg}")
         return _result(
             False,
             error=error_msg,
@@ -396,7 +423,7 @@ def push_config_commands(
         )
     except NetmikoAuthenticationException as exc:
         error_msg = f"SSH authentication failed during config push: {str(exc)}"
-        current_app.logger.error(f"[AUTOMATION] Auth failure on {device_payload.get('name')}: {error_msg}")
+        _log("error", f"[AUTOMATION] Auth failure on {device_payload.get('name')}: {error_msg}")
         return _result(
             False,
             error=error_msg,
@@ -406,7 +433,7 @@ def push_config_commands(
         )
     except Exception as exc:
         error_msg = f"Configuration push failed: {str(exc)}"
-        current_app.logger.error(
+        _log("error",
             f"[AUTOMATION] Config push error on {device_payload.get('name')}: {error_msg}"
         )
         return _result(
@@ -514,15 +541,11 @@ def execute_config_job(
         return []
 
     cfg = _current_config()
-    worker_limit = max_workers or cfg.get("AUTOMATION_MAX_WORKERS") or 10
-    worker_count = max(1, min(int(worker_limit), len(serialized_devices)))
+    configured_limit = int(max_workers or cfg.get("AUTOMATION_MAX_WORKERS") or 10)
+    safe_limit = int(cfg.get("AUTOMATION_SAFE_MAX_WORKERS") or 8)
+    worker_limit = max(1, min(configured_limit, safe_limit))
+    worker_count = max(1, min(worker_limit, len(serialized_devices)))
     ordered_results: list[dict | None] = [None] * len(serialized_devices)
-
-    # Build device objects map for enable_secret lookup
-    device_obj_map = {}
-    if device_list:
-        for i, dev in enumerate(device_list):
-            device_obj_map[i] = dev
 
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="netmiko-job") as executor:
         future_map = {
@@ -541,7 +564,6 @@ def execute_config_job(
                 ordered_results[index] = future.result()
             except Exception as exc:
                 device = serialized_devices[index]
-                device_obj = device_obj_map.get(index)
                 ordered_results[index] = _result(
                     False,
                     error=f"Unhandled job execution error: {str(exc)}",
@@ -549,6 +571,6 @@ def execute_config_job(
                     device_name=device.get("name"),
                     commands=commands,
                 )
-                current_app.logger.error(f"[AUTOMATION] Job execution failed for device {device.get('name')}: {exc}")
+                _log("error", f"[AUTOMATION] Job execution failed for device {device.get('name')}: {exc}")
 
     return [item for item in ordered_results if item is not None]

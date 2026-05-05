@@ -20,6 +20,7 @@ from ..db import db
 from ..models.alert import Alert
 from ..models.device import Device
 from ..models.metrics import Metrics
+from .automation_service import serialize_device
 
 
 scheduler = BackgroundScheduler()
@@ -69,7 +70,7 @@ def _host_status_label(is_up: bool) -> str:
     return "Online" if is_up else "Offline"
 
 
-def _get_device_credentials(device: Device | None = None) -> tuple[str | None, str | None, str | None]:
+def _get_device_credentials(device: Any | None = None) -> tuple[str | None, str | None, str | None]:
     """
     Get SSH credentials from app config or device-specific config.
     
@@ -83,7 +84,9 @@ def _get_device_credentials(device: Device | None = None) -> tuple[str | None, s
     
     # Prefer device-specific enable_secret
     secret = None
-    if device and hasattr(device, 'enable_secret') and device.enable_secret:
+    if isinstance(device, dict) and device.get("enable_secret"):
+        secret = device.get("enable_secret")
+    elif device and hasattr(device, 'enable_secret') and device.enable_secret:
         secret = device.enable_secret
     else:
         secret = config.get("DEVICE_ENABLE_SECRET")
@@ -259,22 +262,38 @@ def _fetch_metrics_via_ssh(device: Device) -> dict[str, Any]:
         
         # Enable privilege mode explicitly
         conn.enable()
-        conn.clear_buffer()
+        time.sleep(0.25)
         
         # Dynamically discover the prompt to be resilient to hostname/mode changes
         base_prompt = conn.find_prompt(delay_factor=2)
         current_app.logger.debug(f"[MONITOR] Device {device.name} prompt: {base_prompt}")
         
-        # Fetch CPU usage with dynamic expect_string for robust prompt detection
-        cpu_output = conn.send_command("show processes cpu", read_timeout=timeout, expect_string=r'[#>]')
+        # Clear any banner or buffered output before each command read.
+        conn.clear_buffer()
+        cpu_output = conn.send_command(
+            "show processes cpu",
+            read_timeout=timeout,
+            expect_string=r"#",
+            delay_factor=2,
+        )
         cpu = _parse_cisco_cpu(cpu_output)
         
-        # Fetch memory usage with dynamic expect_string
-        memory_output = conn.send_command("show memory", read_timeout=timeout, expect_string=r'[#>]')
+        conn.clear_buffer()
+        memory_output = conn.send_command(
+            "show memory",
+            read_timeout=timeout,
+            expect_string=r"#",
+            delay_factor=2,
+        )
         memory = _parse_cisco_memory(memory_output)
         
-        # Fetch uptime with dynamic expect_string
-        uptime_output = conn.send_command("show version", read_timeout=timeout, expect_string=r'[#>]')
+        conn.clear_buffer()
+        uptime_output = conn.send_command(
+            "show version",
+            read_timeout=timeout,
+            expect_string=r"#",
+            delay_factor=2,
+        )
         uptime = _parse_uptime(uptime_output)
         
         current_app.logger.info(
@@ -314,7 +333,7 @@ def _fetch_metrics_via_ssh(device: Device) -> dict[str, Any]:
 
 
 def _save_metrics_to_db(device_id: int, metrics: dict[str, Any]) -> None:
-    """Save metrics to the Metrics model."""
+    """Stage metrics for the Metrics model. Caller owns the transaction commit."""
     if not metrics.get("success"):
         return
     
@@ -334,8 +353,6 @@ def _save_metrics_to_db(device_id: int, metrics: dict[str, Any]) -> None:
                 timestamp=timestamp,
             )
             db.session.add(m)
-    
-    db.session.commit()
 
 
 def _update_inventory_status(devices: list[Device], status_by_id: dict[int, bool], degraded_by_id: dict[int, bool] | None = None) -> None:
@@ -431,7 +448,7 @@ def _update_inventory_status(devices: list[Device], status_by_id: dict[int, bool
             device.last_seen = current_utc_time
             current_app.logger.debug(f"[MONITOR] Device polled: {device.name} - last_seen updated")
     
-    if changed:
+    if changed or db.session.new or db.session.dirty:
         db.session.commit()
         current_app.logger.info(
             f"[MONITOR] Device status changes committed - {len(devices)} devices scanned"
@@ -487,7 +504,7 @@ def _fetch_with_ping_fallback(devices: list[Device], config: dict[str, Any]) -> 
     }
 
 
-def _monitor_worker(app, device: Device) -> dict[str, Any]:
+def _monitor_worker(app, device_payload: dict[str, Any]) -> dict[str, Any]:
     """
     Worker function for monitoring with explicit Flask app context.
     
@@ -496,18 +513,31 @@ def _monitor_worker(app, device: Device) -> dict[str, Any]:
     
     Args:
         app: The Flask application object (not a proxy)
-        device: Device ORM model
+        device_payload: Serialized device payload. The worker re-queries its ORM row.
     
     Returns:
         Metrics dict with success, is_up, cpu, memory, uptime, etc.
     """
     with app.app_context():
         try:
+            device_id = int(device_payload["id"])
+            device = Device.query.get(device_id)
+            if device is None:
+                return {
+                    "device_id": device_id,
+                    "success": False,
+                    "is_up": False,
+                    "degraded": False,
+                    "cpu": None,
+                    "memory": None,
+                    "uptime": None,
+                    "error": "device not found",
+                }
             return _fetch_metrics_via_ssh(device)
         except Exception as exc:
-            app.logger.error(f"[MONITOR] Worker error for {device.name}: {exc}")
+            app.logger.error(f"[MONITOR] Worker error for {device_payload.get('name')}: {exc}")
             return {
-                "device_id": device.id,
+                "device_id": device_payload.get("id"),
                 "success": False,
                 "is_up": False,
                 "degraded": True,
@@ -516,6 +546,8 @@ def _monitor_worker(app, device: Device) -> dict[str, Any]:
                 "uptime": None,
                 "error": str(exc),
             }
+        finally:
+            db.session.remove()
 
 
 def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_inventory: bool = True) -> dict:
@@ -535,7 +567,9 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
     status_by_id: dict[int, bool] = {}
     degraded_by_id: dict[int, bool] = {}
     hosts_payload = []
-    max_workers = int(config.get("MONITOR_MAX_WORKERS", 15))
+    configured_workers = int(config.get("MONITOR_MAX_WORKERS", 15))
+    safe_workers = int(config.get("MONITOR_SAFE_MAX_WORKERS", 8))
+    max_workers = max(1, min(configured_workers, safe_workers, len(devices) or 1))
     
     try:
         # Parallel SSH monitoring using Netmiko
@@ -544,11 +578,12 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
         # Extract the actual app object from the current_app proxy
         # This is essential because threads cannot use the proxy directly
         app = current_app._get_current_object()
+        serialized_devices = [serialize_device(device) for device in devices]
         
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="monitor-ssh") as executor:
             future_map = {
-                executor.submit(_monitor_worker, app, device): device.id
-                for device in devices
+                executor.submit(_monitor_worker, app, device_payload): device_payload["id"]
+                for device_payload in serialized_devices
             }
             
             for future in as_completed(future_map):
@@ -611,6 +646,8 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
     
     if update_inventory:
         _update_inventory_status(devices, status_by_id, degraded_by_id)
+    elif db.session.new or db.session.dirty:
+        db.session.commit()
     
     payload["generated_at"] = datetime.utcnow().isoformat()
     payload["summary"] = {
@@ -624,8 +661,11 @@ def fetch_monitoring_snapshot(devices: list[Device] | None = None, update_invent
 def _run_poll_cycle(app) -> None:
     """Execute one full monitoring cycle inside its own app context."""
     with app.app_context():
-        devices = Device.query.order_by(Device.id.asc()).all()
-        fetch_monitoring_snapshot(devices=devices, update_inventory=True)
+        try:
+            devices = Device.query.order_by(Device.id.asc()).all()
+            fetch_monitoring_snapshot(devices=devices, update_inventory=True)
+        finally:
+            db.session.remove()
 
 
 def _log_monitor_completion(app, future) -> None:
@@ -669,7 +709,8 @@ def start_monitor(app) -> None:
         seconds=interval,
         id="device_monitor",
         replace_existing=True,
-        max_instances=3,
-        misfire_grace_time=10,
+        max_instances=1,
+        misfire_grace_time=15,
+        coalesce=True,
     )
     scheduler.start()
